@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SubData 多开</string>
+    <string name="xposed_description">把指定 App 的数据目录重定向到独立 slot，实现同一 APK 的多账号数据隔离。</string>
+    <string-array name="xposed_scope">
+        <item>com.chaoxing.mobile</item>
+    </string-array>
+</resources>
