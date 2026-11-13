@@ -15,8 +15,8 @@ android {
         applicationId = "com.xavier.subdata"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2.0-beta"
+        versionCode = 3
+        versionName = "0.2.1"
     }
 
     buildTypes {

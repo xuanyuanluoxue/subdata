@@ -178,6 +178,8 @@ public final class TargetRepo {
         m.put("redirect_external", "true");
         m.put("hook_file_paths", "true");
         m.put("hook_data_dir", "true");
+        m.put("main_slot", SlotConfig.DEFAULT_MAIN_SLOT);
+        m.put("island_notice", "true");
         return m;
     }
 

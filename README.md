@@ -11,6 +11,7 @@
 | minSdk / targetSdk | 26 / 34 |
 | 运行环境 | Android 13–17；目标机 Android 17 (SDK 37) / HyperOS 4 / KernelSU + LSPosed 或 Vector |
 | 默认白名单 | `com.chaoxing.mobile`（学习通 7.0.4） |
+| 版本 | `0.2.1`（versionCode 3） |
 
 ## 1. 原理
 
@@ -26,6 +27,14 @@ LSPosed/Vector 把模块注入到目标 App 的每个进程，模块把「数据
     ├── subdata.log                        ← 模块运行日志
     ├── a/                                 ← slot a 的数据根（files/ databases/ shared_prefs/ ...）
     └── b/                                 ← slot b 的数据根
+        ├── databases/ shared_prefs/ ...    ← 标准骨架，不克隆也会建好
+        └── .skeleton                       ← 骨架已初始化标记
+```
+
+DE（设备加密）侧同样有一套，只是内容少一点：
+
+```
+/data/user_de/0/com.chaoxing.mobile/subdata/<slot>/{cache,code_cache,shared_prefs,...}
 ```
 
 被 hook 的 API 返回的路径全部指向 `subdata/<slot>/...`，App 自己完全无感。
@@ -56,7 +65,7 @@ export ANDROID_HOME=$HOME/Android/Sdk
 export ANDROID_SDK_ROOT=$ANDROID_HOME
 
 ./gradlew assembleDebug          # -> app/build/outputs/apk/debug/app-debug.apk
-./gradlew testDebugUnitTest      # 13 个单元测试（路径映射 / slot 校验 / 配置读写）
+./gradlew testDebugUnitTest      # 47 个单元测试（路径映射 / slot 校验 / 配置读写 / 目录骨架 / 超级岛 JSON）
 ```
 
 `local.properties` 里的 `sdk.dir` 指向本机 SDK；换机器时改这一行或改用 `ANDROID_HOME`。
@@ -92,6 +101,8 @@ su -c 'echo b > /data/data/com.chaoxing.mobile/subdata/slot; am force-stop com.c
 
 ```bash
 # 方式一：关掉自动克隆，新 slot 会是空目录
+#   （0.2.1 起模块仍会自动建好 databases / shared_prefs / files … 标准骨架，
+#    并把原数据目录的目录结构镜像成空目录，只是不拷任何文件）
 su -c 'echo clone_on_first_run=false >> /data/data/com.chaoxing.mobile/subdata/subdata.conf'
 su -c 'echo b > /data/data/com.chaoxing.mobile/subdata/slot; am force-stop com.chaoxing.mobile'
 
@@ -111,10 +122,50 @@ su -c 'mkdir -p /data/data/com.chaoxing.mobile/subdata/b && touch /data/data/com
 | `hook_file_paths` | `true` | 兜底 hook `File` 构造器（App 拼绝对路径时）；有性能顾虑可关 |
 | `hook_data_dir` | `true` | 是否 hook `ContextImpl.getDataDir()`。它对整棵路径树影响最大，App 异常崩溃时可先关它 |
 | `slot` | `a` | 没有 `slot` 文件时用这个值 |
+| `main_slot` | `a` | 主槽。`slot` 等于它时视为「原始数据」，不发超级岛提示 |
+| `island_notice` | `true` | 非主槽时在小米超级岛提示「当前处于副本数据」 |
 
 白名单在模块 App 首页编辑（存模块自己的 SharedPreferences），每行一个包名。
 
-## 7. 回滚
+## 7. 超级岛提示（非主槽）
+
+当 App 跑在**非主槽**（`slot != main_slot`）时，模块会在小米超级岛（HyperOS 焦点通知）
+挂一条常驻提示，提醒用户「现在用的是副本数据」：
+
+| 位置 | 内容 |
+| --- | --- |
+| 大岛标题 | 副本数据 |
+| 大岛正文 | 当前使用 `b` 槽 · 与原数据隔离 |
+| 小岛 | App 图标 + 「副本数据」 |
+
+实现要点（`IslandParam` + `IslandNotice`）：
+
+- `miui.focus.param` 的 JSON 由 `IslandParam#json(String slot)` 生成，结构与真机上
+  已进岛的通知 dump 完全一致（`param_v2` / `param_island` / `baseInfo.type=2`），
+  `business` 用 `subdata_slot`；
+- 反射调隐藏 API `Notification#promoteOngoing(true)`，方法不存在（非 MIUI）就只写日志；
+- extras 里放 `android.requestPromotedOngoing=true`、`miui.focus.param=<JSON>`，
+  能取到 App 图标时再放 `miui.focus.pics` Bundle（取不到就不放）；
+- 通知渠道 `subdata_island`：`IMPORTANCE_HIGH`、无声、`setOngoing(true)`、`setShowWhen(false)`，
+  小图标用 App 自己的图标；
+- 在 `Application#attach` 之后 2 秒发出，并且**只在主进程**发（多进程 App 的推送进程不发）；
+- 主槽、或 `island_notice=false` 时反而会把残留通知取消掉。
+
+失败不会崩：目标 App 没开通知权限（`areNotificationsEnabled()==false`）、
+ROM 没有 `promoteOngoing`、渠道建不出来，都只写一行 `subdata.log`。
+模块**不会**替你申请 `POST_NOTIFICATIONS`，也不会弹任何权限框。
+
+关掉：
+
+```bash
+su -c 'echo island_notice=false >> /data/data/com.chaoxing.mobile/subdata/subdata.conf'
+su -c 'am force-stop com.chaoxing.mobile'
+```
+
+也可以在模块 App 首页「行为开关 → 超级岛提示」里点掉。主槽想换成别的名字就改
+`main_slot`（比如 `main_slot=b`，那么 b 槽就不发提示、a 槽会发）。
+
+## 8. 回滚
 
 ```bash
 # 1) 只想恢复原状：LSPosed 里取消勾选作用域 → App 立刻回到原始数据（原始数据从未被改动）
@@ -122,25 +173,31 @@ su -c 'mkdir -p /data/data/com.chaoxing.mobile/subdata/b && touch /data/data/com
 su -c 'rm -rf /data/data/com.chaoxing.mobile/subdata'
 ```
 
-## 8. 已知限制
+## 9. 已知限制
 
 - **native 层写死的路径拦不住**：`.so` 里直接 `open("/data/data/<pkg>/...")` 不会被 Java hook 影响。
   学习通的核心业务主要在 DEX（libDexHelper 壳保护的是 DEX），一般能覆盖，但不能保证 100%。
 - **WebView** 的数据目录是 best effort；`getCodeCacheDir` 刻意保留在真实私有目录（放 slot 里意义不大且易踩坑）。
 - 首次克隆发生在 App 极早期（Application.onCreate 之前），数据多时首启会慢几百毫秒到几秒。
+- DE（`/data/user_de/0/<pkg>`）只建目录骨架、不克隆文件：DE 里多是迁移标记类配置，
+  跟着 CE 一起复制反而容易踩坑（这也是 0.2.0 之前 DE 目录根本不存在的原因之一）。
 - 只支持「同一 uid 内多份数据」。真正的双实例（两个进程同时跑、两个桌面图标）不在本模块范围。
 
-## 9. 目录结构
+## 10. 目录结构
 
 ```
 subdata/
 ├── app/src/main/java/com/xavier/subdata/
 │   ├── SubDataModule.java    # Xposed 入口：注入、hook 安装、日志
 │   ├── PathMap.java          # 纯路径映射（无 Android 依赖，可单测）
-│   ├── SlotConfig.java       # slot / 配置文件读取
+│   ├── SlotConfig.java       # slot / 配置文件读取（含 main_slot / island_notice）
+│   ├── SlotSkeleton.java     # slot 目录骨架（不克隆也要建目录；CE + DE）
 │   ├── DataCloner.java       # 首次 clone
+│   ├── IslandParam.java      # 超级岛 JSON / 文案（纯字符串，可单测）
+│   ├── IslandNotice.java     # 发超级岛通知（promoteOngoing 反射 + extras）
 │   └── MainActivity.java     # 模块配置界面
-├── app/src/test/java/...     # PathMapTest（13 个断言）
+├── app/src/test/java/...     # PathMapTest / SlotConfigTest / SlotSkeletonTest
+│                             # / IslandParamTest / SlotConfigExtTest（共 47 个）
 ├── app/libs/xposed-api-82.jar
 └── PLAN.md                   # 调研结论 / 设计 / 风险 / TODO
 ```

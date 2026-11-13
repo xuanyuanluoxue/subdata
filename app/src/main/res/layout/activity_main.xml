@@ -300,6 +300,12 @@
                         layout="@layout/item_switch"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content" />
+
+                    <include
+                        android:id="@+id/row_island"
+                        layout="@layout/item_switch"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

@@ -95,6 +95,8 @@ public class MainActivity extends AppCompatActivity {
                 R.string.switch_file_paths_title, R.string.switch_file_paths_desc);
         bindSwitch(R.id.row_data_dir, "hook_data_dir",
                 R.string.switch_data_dir_title, R.string.switch_data_dir_desc);
+        bindSwitch(R.id.row_island, "island_notice",
+                R.string.switch_island_title, R.string.switch_island_desc);
 
         showVersion();
         reload();

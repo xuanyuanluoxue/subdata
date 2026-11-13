@@ -1,5 +1,6 @@
 package com.xavier.subdata;
 
+import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.database.sqlite.SQLiteDatabase;
 
@@ -107,26 +108,43 @@ public class SubDataModule implements IXposedHookLoadPackage, IXposedHookZygoteI
             return;
         }
         final String dataDir = resolveDataDir(pkg, lp.appInfo);
+        final String deDir = lp.appInfo != null ? lp.appInfo.deviceProtectedDataDir : null;
 
         final SlotConfig cfg = SlotConfig.load(new File(dataDir));
         sLogFile = new File(cfg.controlDir, SlotConfig.LOG_FILE);
+        // 通知模块自己写同一份日志；不能让它反过来引用本类（见 IslandNotice.sLogFile 注释）
+        IslandNotice.setLogFile(sLogFile);
 
         if (!cfg.enabled) {
             logFile(pkg + ": disabled by " + SlotConfig.CONF_FILE);
             return;
         }
 
+        // 顺序不能反：DataCloner 看到 slot 目录已经存在就当「已初始化过」直接返回，
+        // 所以必须先克隆、再补骨架。
+        final StringBuilder sb = new StringBuilder();
+        boolean cloned = false;
         if (cfg.cloneOnFirstRun) {
-            StringBuilder sb = new StringBuilder();
-            boolean cloned = DataCloner.ensureSlot(new File(dataDir), cfg.slot, sb);
+            cloned = DataCloner.ensureSlot(new File(dataDir), cfg.slot, sb);
             if (cloned) {
                 logFile(pkg + ": " + sb);
             }
         }
 
+        // 即使不克隆，也要把 slot 的标准目录骨架和 DE 目录建出来，
+        // 否则 App 一启动就 SQLiteCantOpenDatabaseException / SharedPreferences 建不了目录。
+        final SlotSkeleton.Report skel = SlotSkeleton.ensure(new File(dataDir),
+                deDir == null || deDir.isEmpty() ? null : new File(deDir), cfg.slot);
+        if (skel.changed()) {
+            logFile(pkg + ": slot " + cfg.slot + " skeleton " + skel.summary()
+                    + (deDir == null || deDir.isEmpty() ? " (no DE base)" : " de=" + deDir));
+        }
+
         final List<String> bases = buildBases(pkg, dataDir, lp.appInfo, cfg.redirectExternal);
         final PathMap map = new PathMap(cfg.slot, bases);
         sMap = map;
+
+        final boolean mainProcess = lp.processName == null || pkg.equals(lp.processName);
 
         int hooks = 0;
         hooks += hookContextImpl(lp.classLoader, map, cfg.hookDataDir);
@@ -135,10 +153,12 @@ public class SubDataModule implements IXposedHookLoadPackage, IXposedHookZygoteI
         }
         hooks += hookSqlite(map);
         hooks += hookWebView(map);
+        hooks += hookAppStart(lp.classLoader, cfg, mainProcess);
 
         sInstalled = true;
         logFile(pkg + ": installed slot=" + cfg.slot + " hooks=" + hooks
-                + " bases=" + bases.size() + " proc=" + lp.processName);
+                + " bases=" + bases.size() + " proc=" + lp.processName
+                + " main=" + (cfg.isMainSlot() ? "yes" : "no"));
     }
 
     private static String resolveDataDir(String pkg, ApplicationInfo ai) {
@@ -378,10 +398,47 @@ public class SubDataModule implements IXposedHookLoadPackage, IXposedHookZygoteI
         }
     }
 
+    // ------------------------------------------------------------- 进程启动
+
+    /**
+     * 拿 Context，并在 App 进程起来之后（Application#attach）决定要不要发超级岛提示。
+     *
+     * <p>这里只挂 hook，真正的判断/发送在 {@link IslandNotice} 里做，且全部 try/catch，
+     * 通知失败不影响重定向。
+     */
+    private static int hookAppStart(ClassLoader cl, final SlotConfig cfg, final boolean mainProcess) {
+        try {
+            XposedHelpers.findAndHookMethod("android.app.Application", cl, "attach",
+                    Context.class, new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            try {
+                                Object c = param.args.length > 0 ? param.args[0] : null;
+                                if (c instanceof Context) {
+                                    IslandNotice.schedule((Context) c, cfg, mainProcess);
+                                }
+                            } catch (Throwable t) {
+                                logFile("island schedule failed: " + t);
+                            }
+                        }
+                    });
+            return 1;
+        } catch (Throwable t) {
+            logFile("hook Application#attach skipped: " + t);
+            return 0;
+        }
+    }
+
     // ------------------------------------------------------------------ 日志
 
-    private static void logFile(String msg) {
-        XposedBridge.log(TAG + ": " + msg);
+    /** 模块日志：既写 Xposed 日志，也追加到目标 App 目录下的 subdata.log。 */
+    static void logFile(String msg) {
+        try {
+            XposedBridge.log(TAG + ": " + msg);
+        } catch (Throwable ignored) {
+            // 在模块自己的进程（没有 XposedBridge）里调用会抛 NoClassDefFoundError，
+            // 这里吞掉：写文件日志照常，绝不让日志把主流程带崩。
+        }
         File f = sLogFile;
         if (f == null) {
             return;

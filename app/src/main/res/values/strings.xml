@@ -59,6 +59,8 @@
     <string name="switch_file_paths_desc">拦截 App 自己拼的绝对路径（new File(\"/data/data/…\")）。关掉可减少全局 hook 开销。</string>
     <string name="switch_data_dir_title">hook getDataDir（高风险）</string>
     <string name="switch_data_dir_desc">把整棵数据树的根也重定向，覆盖最彻底，但会波及 App 里所有依赖 getDataDir 的第三方 SDK，出问题优先关它。</string>
+    <string name="switch_island_title">超级岛提示</string>
+    <string name="switch_island_desc">非主槽时在超级岛提示「当前处于副本数据」；主槽（默认 a）不发通知。学习通自己没开通知权限时会静默失败。</string>
     <string name="switch_write_ok">已保存，强制停止目标 App 后生效</string>
     <string name="switch_write_fail">写入失败：%1$s</string>
 

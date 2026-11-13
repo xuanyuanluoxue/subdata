@@ -24,6 +24,8 @@ import java.util.regex.Pattern;
  *      hook_file_paths=true
  *      hook_data_dir=true
  *      slot=a
+ *      main_slot=a        —— 主槽，非主槽时会在超级岛提示
+ *      island_notice=true —— 非主槽时发超级岛提示
  * subdata/subdata.log   —— 运行日志（本模块写入）
  * </pre>
  *
@@ -33,6 +35,8 @@ import java.util.regex.Pattern;
 public final class SlotConfig {
 
     public static final String DEFAULT_SLOT = "a";
+    /** 主槽：与它相同的 slot 视为「原始数据」，不发超级岛提示。 */
+    public static final String DEFAULT_MAIN_SLOT = "a";
     public static final String SLOT_FILE = "slot";
     public static final String CONF_FILE = "subdata.conf";
     public static final String LOG_FILE = "subdata.log";
@@ -40,7 +44,7 @@ public final class SlotConfig {
     /** 写回文件时的稳定顺序，方便人看和 diff。 */
     private static final String[] CONF_ORDER = {
             "enabled", "clone_on_first_run", "redirect_external",
-            "hook_file_paths", "hook_data_dir", "slot",
+            "hook_file_paths", "hook_data_dir", "slot", "main_slot", "island_notice",
     };
 
     /** 只允许安全字符，且不能与控制目录同名。 */
@@ -53,9 +57,14 @@ public final class SlotConfig {
     public final boolean redirectExternal;
     public final boolean hookFilePaths;
     public final boolean hookDataDir;
+    /** 主槽名，与 {@link #slot} 相同表示没在用副本。 */
+    public final String mainSlot;
+    /** 非主槽时是否在小米超级岛提示。 */
+    public final boolean islandNotice;
 
     private SlotConfig(File controlDir, String slot, boolean enabled, boolean cloneOnFirstRun,
-                       boolean redirectExternal, boolean hookFilePaths, boolean hookDataDir) {
+                       boolean redirectExternal, boolean hookFilePaths, boolean hookDataDir,
+                       String mainSlot, boolean islandNotice) {
         this.controlDir = controlDir;
         this.slot = slot;
         this.enabled = enabled;
@@ -63,6 +72,13 @@ public final class SlotConfig {
         this.redirectExternal = redirectExternal;
         this.hookFilePaths = hookFilePaths;
         this.hookDataDir = hookDataDir;
+        this.mainSlot = mainSlot;
+        this.islandNotice = islandNotice;
+    }
+
+    /** 当前是否就是主槽（主槽不发超级岛提示）。 */
+    public boolean isMainSlot() {
+        return mainSlot.equals(slot);
     }
 
     public static SlotConfig load(String dataDir) {
@@ -84,14 +100,38 @@ public final class SlotConfig {
         }
         writeSlot(new File(controlDir, SLOT_FILE), slot);
 
+        return from(controlDir, slot, conf);
+    }
+
+    /**
+     * 从「已经解析好的 conf」构造配置，供 {@link #load(File)} 与单元测试共用，
+     * 保证界面里看到的默认值和模块里跑的默认值是同一套。
+     *
+     * @param slot 已经确定下来的 slot；传 null 则从 conf 里取
+     */
+    static SlotConfig from(File controlDir, String slot, Map<String, String> conf) {
+        final Map<String, String> c = conf == null ? new LinkedHashMap<String, String>() : conf;
+        String s = slot;
+        if (s == null) {
+            s = sanitize(c.get("slot"));
+        }
+        if (s == null) {
+            s = DEFAULT_SLOT;
+        }
+        String mainSlot = sanitize(c.get("main_slot"));
+        if (mainSlot == null) {
+            mainSlot = DEFAULT_MAIN_SLOT;
+        }
         return new SlotConfig(
                 controlDir,
-                slot,
-                truthy(conf.get("enabled"), true),
-                truthy(conf.get("clone_on_first_run"), true),
-                truthy(conf.get("redirect_external"), true),
-                truthy(conf.get("hook_file_paths"), true),
-                truthy(conf.get("hook_data_dir"), true));
+                s,
+                truthy(c.get("enabled"), true),
+                truthy(c.get("clone_on_first_run"), true),
+                truthy(c.get("redirect_external"), true),
+                truthy(c.get("hook_file_paths"), true),
+                truthy(c.get("hook_data_dir"), true),
+                mainSlot,
+                truthy(c.get("island_notice"), true));
     }
 
     /** 非法 slot 名返回 null（绝不接受 "."、".."、"/" 之类）。 */
