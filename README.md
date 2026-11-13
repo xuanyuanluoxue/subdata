@@ -265,3 +265,11 @@ subdata/
 ├── app/libs/xposed-api-82.jar
 └── PLAN.md                   # 调研结论 / 设计 / 风险 / TODO
 ```
+
+[![Android CI](https://github.com/xuanyuanluoxue/subdata/actions/workflows/android.yml/badge.svg)](https://github.com/xuanyuanluoxue/subdata/actions/workflows/android.yml)
+
+## 构建与 CI
+
+- **GitHub Actions**（`.github/workflows/android.yml`）：push 到 `main` / PR 自动跑 `testDebugUnitTest` + `assembleDebug`，产物在 Actions 页面的 Artifacts（`subdata-debug-apk`）。
+- 打 `v*` tag 时额外构建 **release APK**（`subdata-<version>-release.apk`，debug key 签名）。
+- 本地构建：`./gradlew assembleDebug`（需 `ANDROID_HOME` 指向含 `platforms;android-37.0` 与 `build-tools;37.0.0` 的 SDK）。
