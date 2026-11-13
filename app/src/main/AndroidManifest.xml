@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- v0.4.0：MCP 服务要在本机监听一个端口（127.0.0.1 也需要 INTERNET 权限） -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- MCP 前台服务：避免 App 退到后台被冻结后客户端全部超时 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
     <!-- 白名单要从已安装应用里勾选，必须能查询全部包 -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
@@ -75,6 +81,16 @@
                 <action android:name="com.xavier.subdata.action.ISLAND_STATE" />
             </intent-filter>
         </receiver>
+
+        <!-- MCP 保活：只做本地端口，specialUse 是 Android 14+ 唯一可用的兜底类型 -->
+        <service
+            android:name=".McpService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keep the local MCP server reachable for AI clients" />
+        </service>
 
         <!-- 诊断包分享：把 App 外部私有目录里的报告临时授权给分享目标读取 -->
         <provider

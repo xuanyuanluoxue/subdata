@@ -15,8 +15,8 @@ android {
         applicationId = "com.xavier.subdata"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
-        versionName = "0.3.1-beta-hotfix"
+        versionCode = 8
+        versionName = "0.4.0-MVP"
     }
 
     buildTypes {
@@ -24,6 +24,8 @@ android {
             isMinifyEnabled = false
         }
         release {
+            // MVP 公开版用 debug key 签名，便于直接安装试用（非商店分发）
+            signingConfig = signingConfigs.getByName("debug")
             // 故意不混淆：模块只有几个类，保留原始堆栈更利于排查。
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

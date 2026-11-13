@@ -69,3 +69,37 @@
 - 模拟器（emulator-5554）冒烟：装包 + 四个 Activity 不崩 + 白名单写入可读回 + 广播对非白名单发送方拒绝
 - **真机待验**：真的能上岛、`POST_PROMOTED_NOTIFICATIONS` 授权结果、`xposedsharedprefs` 后直接注入 Via、EXT 克隆 83MB 的首启手感、半成品自愈日志
 - 设计文档：`docs/PLAN-v031.md`
+
+
+## v0.4.0（B 线七期）· MCP 服务
+
+主题：**让 AI 客户端能查、能切、能取证**，不新增 hook、不改映射逻辑。
+
+| 交付 | 落点 |
+| --- | --- |
+| 产品分析 | `docs/PRODUCT-MCP.md`（3 个只读 PM agent + 汇总裁决；11 个工具；否决 5 项） |
+| 协议文档 | `docs/MCP.md`（方法、鉴权、工具表、curl 示例、客户端配置、排障） |
+| 传输层 | `McpServer`（自写 HTTP）+ `McpHttp`（请求解析）+ `McpToken`（Bearer，600 权限） |
+| 协议层 | `McpDispatcher`（initialize / tools/list / tools/call / ping / notifications） |
+| 工具层 | `McpTools`（11 个工具 + 白名单/sanitize/confirm 守卫），后端接缝 `McpBackend` / `AndroidMcpBackend` |
+| 生命周期 | `McpManager`（设置/单例/状态）+ `McpService`（前台服务保活） |
+| UI | 首页「MCP 服务」卡片：开关、端口、token 复制/重置、运行状态、请求数、局域网风险确认 |
+| 单测 | **193 例全绿**（新增 `JsonTest` / `McpTokenTest` / `McpHttpTest` / `McpDispatcherTest` / `McpToolsTest`） |
+| 产物 | `app-debug.apk`（versionCode 7 / versionName 0.4.0），md5 见提交说明 |
+
+### 真机实测（小米 M332BF / Android 17 / KernelSU + Vector 2.2，目标 `mark.via` 7.3.4）
+
+- 安装 0.4.0 → Vector 作用域 `mark.via`（`scope ls` 确认只有它）→ Via 注入正常（`installed slot=a hooks=21`）
+- 电脑 `adb forward tcp:8773 tcp:8773` 后 curl：`initialize` / `tools/list` / `status` / `slots.list` /
+  `slots.switch a→b→a` / `delete`（无 confirm 被拒）/ `health.check` / `log.tail` / `diagnostics.export` 全部通过
+- 切槽验证：`slot=b` → 启动 Via → 日志 `installed slot=b ... main=no`；切回 a → `installed slot=a ... main=yes`
+- 鉴权：错 token → 401；学习通包名 → `包名不在白名单内` 拒绝
+- 结束时：Via 留在 slot a、局域网关闭（`host=127.0.0.1`）、MCP 服务运行中
+
+### 真机发现并修复
+
+模块 App 的 mount namespace 被裁剪（`/data/data` 仅 3 条），`test -d /data/data/mark.via` 返回 1。
+`RootShell` 增加 `nsenter -t 1 -m` 自动逃逸（探测可用才启用），修复后 `slots.list` 正常返回体积。
+
+另修：进程重启后 SharedPreferences 读到空表，导致「局域网」开关自己变回开。安全开关改为
+`files/mcp.lan`（fail-closed：读不到按关），实测 40s 内稳定 `127.0.0.1`，局域网 IP 连接被拒。

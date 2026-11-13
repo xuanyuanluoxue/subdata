@@ -11,7 +11,7 @@
 | minSdk / targetSdk | 26 / 34 |
 | 运行环境 | Android 13–17；目标机 Android 17 (SDK 37) / HyperOS 4 / KernelSU + LSPosed 或 Vector |
 | 默认白名单 | `com.chaoxing.mobile`（学习通 7.0.4） |
-| 版本 | `0.2.1`（versionCode 3） |
+| 版本 | `0.4.0`（versionCode 7） |
 
 ## 1. 原理
 
@@ -199,6 +199,37 @@ su -c 'rm -rf /data/data/com.chaoxing.mobile/subdata'
 | 原子写 | `subdata/slot` 与 `subdata.conf` 改为「临时文件 + `fsync` + rename」（root 侧用 `mv -f`），写一半掉电不会退回默认 slot |
 | 单测 | 74 → 118（新增 `SlotStateTest` / `ExtClonerTest` / `AtomicFilesTest` / `IslandBroadcastTest` / `IslandDebounceTest`） |
 
+## 8.6 v0.4.0 变更（MCP 服务 / versionCode 7）
+
+给 AI 客户端（DSH / 小爱 / 任意 MCP 客户端）一个直接操作模块的入口，不必人工点界面：
+
+```bash
+# 手机端：首页「MCP 服务」→ 启用 → 复制 token
+# 电脑端（同内网）：
+adb connect 192.168.0.118:5555 && adb forward tcp:8773 tcp:8773
+curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"subdata.status","arguments":{}}}' \
+  http://127.0.0.1:8773/mcp
+```
+
+| 项 | 说明 |
+| --- | --- |
+| 传输 | JSON-RPC 2.0 over HTTP，`POST /mcp`（无 SSE） |
+| 监听 | 默认 `127.0.0.1:8773`；「允许局域网访问」默认关、开启要过风险确认 |
+| 鉴权 | `Authorization: Bearer <token>`，token 在 `files/mcp.token`（600），UI 可复制/重置 |
+| 工具 | 11 个：`status` / `targets.list/add/remove` / `slots.list/create/switch/delete` / `log.tail` / `health.check` / `diagnostics.export` |
+| 危险操作 | `slots.switch` 强制 `am force-stop`；`slots.delete` 必须 `confirm=true`，当前槽/主槽拒绝 |
+| 守卫 | `pkg` 必须过 `sanitizePkg` 且在白名单；`slot` 必须 `[A-Za-z0-9_-]{1,32}` |
+| 保活 | 前台服务 `McpService`（低优先级常驻通知），关开关即停 |
+
+实现落在纯 Java 层（无新依赖）：`Json`（自写解析器）、`McpHttp`（自写 HTTP）、`McpToken`、
+`McpDispatcher`、`McpTools`、`McpBackend` / `AndroidMcpBackend`、`McpServer`、`McpManager`、`McpService`；
+UI 在首页新增「MCP 服务」区块。完整协议、工具参数、curl 示例见 **`docs/MCP.md`**，
+需求分析与否决项见 **`docs/PRODUCT-MCP.md`**。
+
+> 顺带修掉一个真机 bug：部分环境给模块 App 的 mount namespace 被裁剪（`/data/data` 只剩 3 个条目），
+> 导致「目标 App 未安装」、切槽全失败。`RootShell` 现在探测 `nsenter -t 1 -m` 并自动回全局 namespace。
+
 ## 9. 已知限制
 
 - **native 层写死的路径拦不住**：`.so` 里直接 `open("/data/data/<pkg>/...")` 不会被 Java hook 影响。
@@ -230,7 +261,7 @@ subdata/
 │   ├── IslandReceiver.java   # 接收端：认人 → IslandPoster
 │   ├── IslandPoster.java     # 用模块 App 身份 post / cancel 超级岛通知
 │   └── MainActivity.java     # 模块配置界面
-├── app/src/test/java/...     # 10 个测试类，共 118 个用例（0.3.1 新增 5 个类）
+├── app/src/test/java/...     # 15 个测试类，共 193 个用例（0.4.0 新增 5 个类 / 75 例）
 ├── app/libs/xposed-api-82.jar
 └── PLAN.md                   # 调研结论 / 设计 / 风险 / TODO
 ```
