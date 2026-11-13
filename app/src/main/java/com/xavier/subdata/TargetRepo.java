@@ -20,6 +20,11 @@ public final class TargetRepo {
         return "/data/data/" + pkg;
     }
 
+    /** 包名是否可信（挡住 ".." / "/" 这类会让路径跑出 /data/data 的值）。 */
+    public static boolean validPkg(String pkg) {
+        return SlotConfig.sanitizePkg(pkg) != null;
+    }
+
     public static String controlDir(String pkg) {
         return dataDir(pkg) + "/" + PathMap.CONTROL_DIR;
     }
@@ -54,6 +59,9 @@ public final class TargetRepo {
     }
 
     public static boolean writeConf(String pkg, Map<String, String> kv) {
+        if (!validPkg(pkg)) {
+            return false;
+        }
         mkdirs(pkg);
         if (!RootShell.writeFile(confFile(pkg), SlotConfig.formatConf(kv))) {
             return false;
@@ -63,7 +71,7 @@ public final class TargetRepo {
     }
 
     public static boolean writeSlot(String pkg, String slot) {
-        if (SlotConfig.sanitize(slot) == null) {
+        if (SlotConfig.sanitize(slot) == null || !validPkg(pkg)) {
             return false;
         }
         mkdirs(pkg);
@@ -98,7 +106,7 @@ public final class TargetRepo {
 
     public static boolean createSlot(String pkg, String slot) {
         String s = SlotConfig.sanitize(slot);
-        if (s == null) {
+        if (s == null || !validPkg(pkg)) {
             return false;
         }
         String dir = controlDir(pkg) + "/" + s;
@@ -112,7 +120,7 @@ public final class TargetRepo {
     public static boolean renameSlot(String pkg, String from, String to) {
         String a = SlotConfig.sanitize(from);
         String b = SlotConfig.sanitize(to);
-        if (a == null || b == null || a.equals(b)) {
+        if (a == null || b == null || a.equals(b) || !validPkg(pkg)) {
             return false;
         }
         String src = controlDir(pkg) + "/" + a;
@@ -140,17 +148,70 @@ public final class TargetRepo {
     }
 
     public static boolean clearLog(String pkg) {
+        if (!validPkg(pkg)) {
+            return false;
+        }
         return RootShell.run("rm -f " + RootShell.shq(logFile(pkg))).ok();
     }
 
     /** 危险操作：只删 control 目录（副本 + 日志 + 配置），不碰原始数据。 */
     public static boolean deleteControlDir(String pkg) {
+        if (!validPkg(pkg)) {
+            return false;
+        }
         String dir = controlDir(pkg);
         // 双重校验：路径必须以 /data/data/<pkg>/subdata 结尾，防止拼错删到别处
         if (!dir.equals("/data/data/" + pkg + "/" + PathMap.CONTROL_DIR)) {
             return false;
         }
         return RootShell.run("rm -rf " + RootShell.shq(dir), 30).ok();
+    }
+
+    /**
+     * 每个 slot 的数据占用（字节）。一次 su 调用统计全部槽，避免 N 次往返。
+     *
+     * <p>{@code du -sk} 的输出交给纯 Java 的 {@link SlotStats#parseDu(String)} 解析，
+     * 解析逻辑单独有单测覆盖。读不到（没 root / 目录不存在）时返回空表。</p>
+     */
+    public static Map<String, Long> slotSizes(String pkg) {
+        if (!validPkg(pkg)) {
+            return new LinkedHashMap<>();
+        }
+        String dir = controlDir(pkg);
+        String out = RootShell.run("du -sk " + RootShell.shq(dir) + "/*/ 2>/dev/null", 25).out;
+        return SlotStats.parseDu(out);
+    }
+
+    /**
+     * 删除单个 slot。只删 {@code subdata/<slot>}，绝不碰原始数据目录。
+     *
+     * <p>与 {@link #deleteControlDir} 一样做双重路径校验：拼出来的路径必须严格等于
+     * {@code /data/data/<pkg>/subdata/<sanitize(slot)>}，否则直接拒绝。</p>
+     */
+    public static boolean deleteSlot(String pkg, String slot) {
+        String s = SlotConfig.sanitize(slot);
+        if (s == null || !validPkg(pkg)) {
+            return false;
+        }
+        String dir = controlDir(pkg) + "/" + s;
+        if (!dir.equals("/data/data/" + pkg + "/" + PathMap.CONTROL_DIR + "/" + s)) {
+            return false;
+        }
+        return RootShell.run("rm -rf " + RootShell.shq(dir), 30).ok();
+    }
+
+    /**
+     * 切换 slot 并强制停止目标 App，一步到位。
+     *
+     * <p>只写 slot 文件是不会立即生效的：目标 App 进程还持有旧目录的句柄。
+     * 以「写 slot 文件成功」为准返回，force-stop 失败不影响结果（用户可以自己停）。</p>
+     */
+    public static boolean switchAndStop(String pkg, String slot) {
+        if (!writeSlot(pkg, slot)) {
+            return false;
+        }
+        forceStop(pkg);
+        return true;
     }
 
     public static boolean forceStop(String pkg) {
@@ -184,6 +245,9 @@ public final class TargetRepo {
     }
 
     private static void mkdirs(String pkg) {
+        if (!validPkg(pkg)) {
+            return;
+        }
         if (RootShell.run("mkdir -p " + RootShell.shq(controlDir(pkg))).ok()) {
             RootShell.handOverToApp(pkg, controlDir(pkg), true);
         }

@@ -134,6 +134,38 @@ public final class SlotConfig {
                 truthy(c.get("island_notice"), true));
     }
 
+    /**
+     * 包名校验：Java 包名规则的一个收紧版本。
+     *
+     * <p>存在的意义是<b>越界防护</b>：{@link TargetRepo} 里所有路径都是
+     * {@code "/data/data/" + pkg + ...} 拼出来的，一旦 pkg 被写成 {@code ".."}，
+     * {@code rm -rf /data/data/../subdata} 就会删到 {@code /data/subdata}。
+     * 白名单正常情况下不会出现这种值，但危险操作前多一道校验几乎零成本。</p>
+     *
+     * @return 校验通过的包名原样返回；非法返回 null
+     */
+    public static String sanitizePkg(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String s = raw.trim();
+        if (s.isEmpty() || s.length() > 255) {
+            return null;
+        }
+        if (!PKG_RE.matcher(s).matches()) {
+            return null;
+        }
+        // 再挡一次显式的路径穿越写法（正则已挡住，这里是可读的兜底）
+        if (s.contains("..") || s.contains("/") || s.contains("\\")) {
+            return null;
+        }
+        return s;
+    }
+
+    /** 合法包名：至少两段、每段字母开头、只含字母数字下划线。 */
+    private static final Pattern PKG_RE =
+            Pattern.compile("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+");
+
     /** 非法 slot 名返回 null（绝不接受 "."、".."、"/" 之类）。 */
     public static String sanitize(String raw) {
         if (raw == null) {
