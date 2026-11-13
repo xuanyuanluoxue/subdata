@@ -1,158 +1,323 @@
 package com.xavier.subdata;
 
-import android.app.Activity;
-import android.content.ClipData;
-import android.content.ClipboardManager;
-import android.content.Context;
-import android.content.SharedPreferences;
+import android.content.Intent;
 import android.os.Bundle;
-import android.text.InputType;
-import android.util.TypedValue;
-import android.view.ViewGroup;
-import android.widget.Button;
-import android.widget.EditText;
-import android.widget.LinearLayout;
-import android.widget.ScrollView;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.View;
 import android.widget.TextView;
-import android.widget.Toast;
+
+import androidx.annotation.Nullable;
+import androidx.appcompat.app.AppCompatActivity;
+
+import com.google.android.material.appbar.MaterialToolbar;
+import com.google.android.material.button.MaterialButton;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.google.android.material.materialswitch.MaterialSwitch;
+import com.google.android.material.snackbar.Snackbar;
+
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
- * 模块自己的配置界面（不参与 hook）。
- * 保存白名单到 SharedPreferences，由 {@link SubDataModule} 在注入时读取。
+ * 首页：模块是否生效 + 目标应用 + slot + 行为开关 + 日志入口 + 危险操作。
+ *
+ * <p>所有对目标 App 私有目录的读写都在后台线程通过 {@link RootShell} 完成，
+ * 主线程只负责渲染，避免 su 弹授权框时界面卡住。
  */
-public class MainActivity extends Activity {
+public class MainActivity extends AppCompatActivity {
 
-    private static final String PREFS_NAME = SubDataModule.PREFS_NAME;
-    private static final String KEY_TARGETS = "targets";
+    private final ExecutorService io = Executors.newSingleThreadExecutor();
+    private final Handler ui = new Handler(Looper.getMainLooper());
 
-    private EditText targetsInput;
+    private TargetStore store;
+
+    private TextView tvStatusState;
+    private TextView tvStatusDetail;
+    private TextView tvCurrentSlot;
+    private TextView tvTargetPkg;
+    private TextView tvVersion;
+    private TextView tvTargetSummary;
+    private TextView tvSlotSummary;
+    private TextView tvLogPreview;
+
+    private MaterialButton btnRefresh;
+
+    /** conf key -> 开关控件（顺序即界面顺序）。 */
+    private final Map<String, MaterialSwitch> switches = new LinkedHashMap<>();
+
+    /** 程序化回填时不要把改动当成用户操作写回文件。 */
+    private boolean binding;
+
+    private String pkg;
+    private Map<String, String> conf = new LinkedHashMap<>();
 
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
 
-        final int pad = dp(20);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(pad, pad, pad, pad);
+        MaterialToolbar toolbar = findViewById(R.id.toolbar);
+        toolbar.setTitle(R.string.title_main);
+        toolbar.setSubtitle(R.string.subtitle_main);
 
-        addTitle(root, "SubData 多开（数据目录隔离）");
-        addBody(root,
-                "原理：LSPosed 注入目标 App 进程，把 ContextImpl 的 getDataDir / getFilesDir / "
-                        + "getCacheDir / getDatabasePath / getSharedPreferencesPath 等重定向到\n"
-                        + "  /data/data/<包名>/subdata/<slot>/\n"
-                        + "同一个 APK、同一个 uid，用不同 slot 即可拥有互不干扰的数据。");
+        store = new TargetStore(this);
 
-        addTitle(root, "① 白名单（每行或用逗号分隔）");
-        targetsInput = new EditText(this);
-        targetsInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
-        targetsInput.setMinLines(2);
-        targetsInput.setText(loadTargets());
-        root.addView(targetsInput, matchWrap());
+        tvStatusState = findViewById(R.id.tv_status_state);
+        tvStatusDetail = findViewById(R.id.tv_status_detail);
+        tvCurrentSlot = findViewById(R.id.tv_current_slot);
+        tvTargetPkg = findViewById(R.id.tv_target_pkg);
+        tvVersion = findViewById(R.id.tv_version);
+        tvTargetSummary = findViewById(R.id.tv_target_summary);
+        tvSlotSummary = findViewById(R.id.tv_slot_summary);
+        tvLogPreview = findViewById(R.id.tv_log_preview);
+        btnRefresh = findViewById(R.id.btn_refresh);
 
-        Button save = new Button(this);
-        save.setText("保存白名单");
-        save.setOnClickListener(v -> {
-            saveTargets(targetsInput.getText().toString());
-            Toast.makeText(this, "已保存，重启目标 App 生效", Toast.LENGTH_SHORT).show();
-        });
-        root.addView(save, matchWrap());
+        btnRefresh.setOnClickListener(v -> reload());
+        findViewById(R.id.btn_manage_apps).setOnClickListener(v ->
+                startActivity(new Intent(this, AppPickerActivity.class)));
+        findViewById(R.id.btn_manage_slots).setOnClickListener(v ->
+                startActivity(new Intent(this, SlotActivity.class)));
+        findViewById(R.id.btn_open_log).setOnClickListener(v ->
+                startActivity(new Intent(this, LogActivity.class)));
+        findViewById(R.id.btn_delete).setOnClickListener(v -> confirmDelete());
 
-        addTitle(root, "② 切 slot（需要 root / KernelSU，执行后 App 会被杀掉重启）");
-        final String pkg = defaultPackage();
-        final String cmd = "su -c 'echo b > /data/data/" + pkg + "/subdata/slot; "
-                + "am force-stop " + pkg + "'";
-        TextView code = addBody(root, cmd);
-        code.setTextIsSelectable(true);
-        code.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        bindSwitch(R.id.row_enabled, "enabled",
+                R.string.switch_enabled_title, R.string.switch_enabled_desc);
+        bindSwitch(R.id.row_clone, "clone_on_first_run",
+                R.string.switch_clone_title, R.string.switch_clone_desc);
+        bindSwitch(R.id.row_external, "redirect_external",
+                R.string.switch_external_title, R.string.switch_external_desc);
+        bindSwitch(R.id.row_file_paths, "hook_file_paths",
+                R.string.switch_file_paths_title, R.string.switch_file_paths_desc);
+        bindSwitch(R.id.row_data_dir, "hook_data_dir",
+                R.string.switch_data_dir_title, R.string.switch_data_dir_desc);
 
-        Button copy = new Button(this);
-        copy.setText("复制命令");
-        copy.setOnClickListener(v -> {
-            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-            if (cm != null) {
-                cm.setPrimaryClip(ClipData.newPlainText("subdata", cmd));
-                Toast.makeText(this, "已复制", Toast.LENGTH_SHORT).show();
+        showVersion();
+        reload();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 从白名单 / slot 页回来要重新读
+        reload();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        io.shutdownNow();
+    }
+
+    private void showVersion() {
+        String v = "?";
+        try {
+            v = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Throwable ignored) {
+            // 拿不到版本号不影响主流程
+        }
+        tvVersion.setText(getString(R.string.version_with_beta, v));
+    }
+
+    private void bindSwitch(int rowId, String key, int titleRes, int descRes) {
+        View row = findViewById(rowId);
+        ((TextView) row.findViewById(R.id.sw_title)).setText(titleRes);
+        ((TextView) row.findViewById(R.id.sw_desc)).setText(descRes);
+        MaterialSwitch sw = row.findViewById(R.id.sw_toggle);
+        sw.setTag(key);
+        switches.put(key, sw);
+        sw.setOnCheckedChangeListener((b, checked) -> {
+            if (binding) {
+                return;
             }
+            saveSwitch(key, checked);
         });
-        root.addView(copy, matchWrap());
-
-        addBody(root,
-                "把 echo b 里的 b 换成你要切到的 slot 名（只允许字母数字下划线短横线）。\n"
-                        + "slot 文件首次运行由模块自动创建，内容默认是 a。");
-
-        addTitle(root, "③ 每个 App 的可选配置");
-        addBody(root,
-                "/data/data/<包名>/subdata/subdata.conf\n"
-                        + "  enabled=true            # 关掉就是完全不重定向\n"
-                        + "  clone_on_first_run=true # 新 slot 首次使用从默认目录克隆\n"
-                        + "  redirect_external=true  # 连 /sdcard/Android/data/<包名> 一起重定向\n"
-                        + "  hook_file_paths=true    # 兜底 hook File 构造（App 自己拼绝对路径时）\n"
-                        + "  slot=a                  # 没有 slot 文件时用这个\n\n"
-                        + "日志：/data/data/<包名>/subdata/subdata.log");
-
-        addTitle(root, "④ 回滚");
-        addBody(root,
-                "1) LSPosed 里取消勾选本模块作用域，或直接停用模块；\n"
-                        + "2) 想彻底清掉：su -c 'rm -rf /data/data/<包名>/subdata'；\n"
-                        + "3) 本模块从不修改 App 的默认数据目录，取消注入后 App 立刻回到原数据。");
-
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(root);
-        setContentView(scroll);
     }
 
-    private String defaultPackage() {
-        String t = loadTargets();
-        String first = t.split("[,;\\s]+")[0].trim();
-        return first.isEmpty() ? SubDataModule.DEFAULT_TARGETS : first;
+    // ------------------------------------------------------------------ 读取
+
+    private void reload() {
+        btnRefresh.setEnabled(false);
+        io.execute(() -> {
+            String target = store.activeTarget();
+            final boolean root = RootShell.available();
+            boolean installed = false;
+            String slot = null;
+            Map<String, String> c = TargetRepo.defaultConf();
+            String log = "";
+            if (root && target != null) {
+                installed = TargetRepo.appInstalled(target);
+                if (installed) {
+                    slot = TargetRepo.readSlot(target);
+                    Map<String, String> onDisk = TargetRepo.readConf(target);
+                    if (!onDisk.isEmpty()) {
+                        c.putAll(onDisk);
+                    }
+                    log = TargetRepo.readLog(target);
+                }
+            }
+            final boolean fInstalled = installed;
+            final String fSlot = slot;
+            final Map<String, String> fConf = c;
+            final String fLog = log;
+            ui.post(() -> render(target, root, fInstalled, fSlot, fConf, fLog));
+        });
     }
 
-    private String loadTargets() {
-        SharedPreferences sp = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        return sp.getString(KEY_TARGETS, SubDataModule.DEFAULT_TARGETS);
+    private void render(String target, boolean root, boolean installed, String slot,
+                        Map<String, String> c, String log) {
+        if (isFinishing() || isDestroyed()) {
+            return;
+        }
+        btnRefresh.setEnabled(true);
+        this.pkg = target;
+        this.conf = c;
+
+        List<String> all = store.targets();
+        tvTargetSummary.setText(target == null
+                ? getString(R.string.status_no_target)
+                : getString(R.string.pkg_label, target,
+                getString(R.string.target_summary, all.size())));
+        tvTargetPkg.setText(target == null ? getString(R.string.value_none) : target);
+
+        String last = TargetRepo.lastInstallLine(log);
+        String logTail = tailLines(log, 3);
+        tvLogPreview.setText(logTail.isEmpty() ? getString(R.string.log_empty) : logTail);
+
+        if (target == null) {
+            tvStatusState.setText(R.string.status_no_target);
+            tvStatusDetail.setVisibility(View.GONE);
+            tvCurrentSlot.setText(R.string.value_none);
+        } else if (!root) {
+            tvStatusState.setText(R.string.status_no_root);
+            tvStatusDetail.setVisibility(View.GONE);
+            tvCurrentSlot.setText(R.string.value_none);
+        } else if (!installed) {
+            tvStatusState.setText(R.string.status_never_run);
+            tvStatusDetail.setText(R.string.status_not_installed);
+            tvStatusDetail.setVisibility(View.VISIBLE);
+            tvCurrentSlot.setText(R.string.value_none);
+        } else if (last == null) {
+            tvStatusState.setText(R.string.status_never_run);
+            tvStatusDetail.setText(R.string.status_never_run_hint);
+            tvStatusDetail.setVisibility(View.VISIBLE);
+            tvCurrentSlot.setText(slot == null ? getString(R.string.value_none) : slot);
+        } else if (last.contains("disabled by")) {
+            tvStatusState.setText(R.string.status_disabled);
+            tvStatusDetail.setText(last);
+            tvStatusDetail.setVisibility(View.VISIBLE);
+            tvCurrentSlot.setText(slot == null ? getString(R.string.value_none) : slot);
+        } else {
+            tvStatusState.setText(R.string.status_active);
+            tvStatusDetail.setText(last);
+            tvStatusDetail.setVisibility(View.VISIBLE);
+            tvCurrentSlot.setText(slot == null ? getString(R.string.value_none) : slot);
+        }
+
+        binding = true;
+        for (Map.Entry<String, MaterialSwitch> e : switches.entrySet()) {
+            MaterialSwitch sw = e.getValue();
+            boolean on = SlotConfig.truthy(c.get(e.getKey()), true);
+            sw.setChecked(on);
+            sw.setEnabled(root && target != null);
+        }
+        binding = false;
+
+        int slotCount = 0;
+        if (root && target != null) {
+            slotCount = TargetRepo.listSlots(target).size();
+        }
+        tvSlotSummary.setText(getString(R.string.slot_summary_with_current,
+                slot == null ? getString(R.string.value_none) : slot, slotCount));
     }
 
-    private void saveTargets(String v) {
+    // ------------------------------------------------------------------ 写入
+
+    private void saveSwitch(String key, boolean checked) {
+        final String target = pkg;
+        if (target == null) {
+            return;
+        }
+        io.execute(() -> {
+            Map<String, String> cur = TargetRepo.readConf(target);
+            if (cur.isEmpty()) {
+                cur.putAll(TargetRepo.defaultConf());
+            }
+            cur.put(key, checked ? "true" : "false");
+            final boolean ok = TargetRepo.writeConf(target, cur);
+            final String err = ok ? "" : getString(R.string.root_denied);
+            ui.post(() -> {
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+                toast(ok ? getString(R.string.switch_write_ok)
+                        : getString(R.string.switch_write_fail, err));
+            });
+        });
+    }
+
+    private void confirmDelete() {
+        final String target = pkg;
+        if (target == null) {
+            toast(getString(R.string.no_target_selected));
+            return;
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.danger_confirm1_title)
+                .setMessage(getString(R.string.danger_confirm1_msg, target))
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.danger_confirm1_yes, (d, w) -> confirmDelete2(target))
+                .show();
+    }
+
+    private void confirmDelete2(String target) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.danger_confirm2_title)
+                .setMessage(getString(R.string.danger_confirm2_msg,
+                        TargetRepo.controlDir(target)))
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.danger_confirm2_yes, (d, w) -> doDelete(target))
+                .show();
+    }
+
+    private void doDelete(String target) {
+        io.execute(() -> {
+            boolean ok = TargetRepo.deleteControlDir(target);
+            ui.post(() -> {
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+                toast(ok ? getString(R.string.danger_deleted)
+                        : getString(R.string.danger_delete_fail, getString(R.string.root_denied)));
+                reload();
+            });
+        });
+    }
+
+    // ------------------------------------------------------------------ 小工具
+
+    private void toast(String msg) {
+        View root = findViewById(R.id.root);
+        Snackbar.make(root, msg, Snackbar.LENGTH_LONG).show();
+    }
+
+    private static String tailLines(String text, int n) {
+        if (text == null || text.isEmpty()) {
+            return "";
+        }
+        String[] lines = text.trim().split("\n");
+        int from = Math.max(0, lines.length - n);
         StringBuilder sb = new StringBuilder();
-        for (String s : v.split("[,;\\s]+")) {
-            String t = s.trim();
-            if (t.isEmpty()) {
-                continue;
-            }
+        for (int i = from; i < lines.length; i++) {
             if (sb.length() > 0) {
                 sb.append('\n');
             }
-            sb.append(t);
+            sb.append(lines[i]);
         }
-        SharedPreferences sp = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        sp.edit().putString(KEY_TARGETS, sb.toString()).apply();
-    }
-
-    private TextView addTitle(LinearLayout root, String text) {
-        TextView tv = new TextView(this);
-        tv.setText(text);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        tv.setPadding(0, dp(18), 0, dp(6));
-        root.addView(tv, matchWrap());
-        return tv;
-    }
-
-    private TextView addBody(LinearLayout root, String text) {
-        TextView tv = new TextView(this);
-        tv.setText(text);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        tv.setLineSpacing(0, 1.25f);
-        root.addView(tv, matchWrap());
-        return tv;
-    }
-
-    private LinearLayout.LayoutParams matchWrap() {
-        return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT);
-    }
-
-    private int dp(int v) {
-        return Math.round(v * getResources().getDisplayMetrics().density);
+        return sb.toString();
     }
 }

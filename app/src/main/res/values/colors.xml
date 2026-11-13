@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="subdata_primary">#00696E</color>
+    <color name="subdata_secondary">#4A6266</color>
+    <color name="subdata_danger">#B3261E</color>
+    <color name="ic_launcher_background">#0E4B50</color>
+</resources>

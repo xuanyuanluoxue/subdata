@@ -5,4 +5,118 @@
     <string-array name="xposed_scope">
         <item>com.chaoxing.mobile</item>
     </string-array>
+
+    <!-- 通用 -->
+    <string name="beta">Beta</string>
+    <string name="beta_hint">Beta 版本 · root 环境请谨慎</string>
+    <string name="refresh">刷新</string>
+    <string name="cancel">取消</string>
+    <string name="save">保存</string>
+    <string name="ok">知道了</string>
+    <string name="retry">重试</string>
+
+    <!-- 首页 -->
+    <string name="title_main">SubData 多开</string>
+    <string name="subtitle_main">数据目录隔离 · 同一 APK 多份数据</string>
+    <string name="section_status">模块状态</string>
+    <string name="section_target">目标应用</string>
+    <string name="section_slot">Slot 管理</string>
+    <string name="section_switches">行为开关</string>
+    <string name="section_log">运行日志</string>
+    <string name="section_danger">危险操作</string>
+    <string name="section_about">关于</string>
+
+    <string name="status_active">已生效</string>
+    <string name="status_inactive">未生效</string>
+    <string name="status_disabled">已被配置停用</string>
+    <string name="status_never_run">还没有运行记录</string>
+    <string name="status_no_root">无法读取（未获得 root 授权）</string>
+    <string name="status_loading">检查中…</string>
+    <string name="status_no_target">还没有选择目标应用</string>
+    <string name="status_not_installed">目标 App 没装，或读不到它的 /data/data 目录</string>
+    <string name="status_never_run_hint">还没有注入记录：先启动一次目标 App，再回来刷新</string>
+    <string name="version_with_beta">%1$s · Beta</string>
+    <string name="slot_summary_with_current">当前 %1$s · 共 %2$d 个 slot</string>
+    <string name="label_current_slot">当前 slot</string>
+    <string name="label_target_pkg">目标包名</string>
+    <string name="label_version">模块版本</string>
+    <string name="label_last_install">最近安装</string>
+    <string name="value_none">未设置</string>
+
+    <string name="btn_manage_apps">管理白名单</string>
+    <string name="btn_manage_slots">管理 slot</string>
+    <string name="btn_open_log">查看日志</string>
+    <string name="target_summary">已选择 %1$d 个应用</string>
+    <string name="slot_summary">共 %1$d 个 slot</string>
+
+    <string name="switch_enabled_title">启用重定向</string>
+    <string name="switch_enabled_desc">关闭后模块对该 App 完全不生效，直接使用原始数据目录。</string>
+    <string name="switch_clone_title">首次运行克隆数据</string>
+    <string name="switch_clone_desc">新 slot 第一次使用时，从默认数据目录复制一份冷数据（跳过 lib / cache）。</string>
+    <string name="switch_external_title">重定向外部存储</string>
+    <string name="switch_external_desc">连 /sdcard/Android/data/包名 一起重定向。部分 App 的外部缓存会因此翻倍。</string>
+    <string name="switch_file_paths_title">兜底 hook File 构造</string>
+    <string name="switch_file_paths_desc">拦截 App 自己拼的绝对路径（new File(\"/data/data/…\")）。关掉可减少全局 hook 开销。</string>
+    <string name="switch_data_dir_title">hook getDataDir（高风险）</string>
+    <string name="switch_data_dir_desc">把整棵数据树的根也重定向，覆盖最彻底，但会波及 App 里所有依赖 getDataDir 的第三方 SDK，出问题优先关它。</string>
+    <string name="switch_write_ok">已保存，强制停止目标 App 后生效</string>
+    <string name="switch_write_fail">写入失败：%1$s</string>
+
+    <string name="danger_title">删除 subdata 目录（回滚）</string>
+    <string name="danger_desc">只会删除 /data/data/包名/subdata（slot 副本、日志、配置）。不会动原始数据，删除后 App 立即回到原数据。</string>
+    <string name="danger_button">删除 subdata 目录</string>
+    <string name="danger_confirm1_title">确认删除 subdata 目录？</string>
+    <string name="danger_confirm1_msg">将删除 %1$s 下的 subdata 目录。\n\n· 只删副本与日志，不会动原始数据\n· 删除后该 App 立即回到原始数据\n· 建议先取消 LSPosed 里对本模块的勾选</string>
+    <string name="danger_confirm1_yes">继续</string>
+    <string name="danger_confirm2_title">再次确认</string>
+    <string name="danger_confirm2_msg">这一步不可撤销。确定要删除 %1$s 吗？</string>
+    <string name="danger_confirm2_yes">确定删除</string>
+    <string name="danger_deleted">已删除</string>
+    <string name="danger_delete_fail">删除失败：%1$s</string>
+
+    <string name="about_principle">原理：LSPosed 注入目标 App 进程，把 ContextImpl 的 getDataDir / getFilesDir / getCacheDir / getDatabasePath / getSharedPreferencesPath 等重定向到 /data/data/包名/subdata/slot/。同一个 APK、同一个 uid，用不同 slot 即拥有互不干扰的数据。</string>
+    <string name="about_risk">风险提示：本模块属于 Beta。它只在被注入的 App 进程内改路径，不写系统分区、不改 APK、不挂载分区；但 root 环境任何模块都可能影响系统稳定性，出问题先在 LSPosed 里取消勾选本模块。</string>
+    <string name="about_rollback">回滚：取消 LSPosed 勾选 → App 立即回到原始数据；需要彻底清理时用上面的「删除 subdata 目录」。</string>
+
+    <!-- 白名单 -->
+    <string name="title_app_picker">目标应用白名单</string>
+    <string name="picker_search_hint">搜索应用名或包名</string>
+    <string name="picker_empty">没有匹配的应用</string>
+    <string name="picker_saved">已保存 %1$d 个目标应用</string>
+    <string name="picker_hint">勾选后需要重启目标 App 才会被重定向。系统应用默认隐藏。</string>
+
+    <!-- Slot -->
+    <string name="title_slots">Slot 管理</string>
+    <string name="slot_current_tag">当前</string>
+    <string name="slot_new">新建 slot</string>
+    <string name="slot_rename">重命名</string>
+    <string name="slot_switch">切换到此 slot</string>
+    <string name="slot_name_hint">slot 名（字母/数字/_/-，最长 32）</string>
+    <string name="slot_name_invalid">slot 名不合法</string>
+    <string name="slot_create_fail">新建失败：%1$s</string>
+    <string name="slot_created">已创建 slot %1$s</string>
+    <string name="slot_rename_title">重命名 slot</string>
+    <string name="slot_renamed">已重命名为 %1$s</string>
+    <string name="slot_switch_confirm">切换到 slot %1$s？切换后需要强制停止目标 App 才会生效。</string>
+    <string name="slot_switched">已切换到 %1$s，请强制停止目标 App</string>
+    <string name="slot_empty">还没有任何 slot。模块首次注入时会自动创建 a。</string>
+    <string name="slot_switch_tip">切换 slot 后要强制停止目标 App（设置 → 应用 → 强行停止）才会生效。</string>
+    <string name="slot_force_stop">强制停止目标 App</string>
+    <string name="slot_force_stopped">已请求强制停止</string>
+    <string name="slot_no_root">需要 root 才能管理 slot</string>
+
+    <!-- 日志 -->
+    <string name="title_log">运行日志</string>
+    <string name="log_copy">复制</string>
+    <string name="log_clear">清空</string>
+    <string name="log_copied">已复制到剪贴板</string>
+    <string name="log_cleared">已清空</string>
+    <string name="log_empty">暂无日志。启动目标 App 后再回来看。</string>
+    <string name="log_no_root">需要 root 才能读取 /data/data 下的日志</string>
+    <string name="log_clear_confirm">清空 subdata.log？不影响任何数据，只是删掉文本记录。</string>
+
+    <!-- root 相关 -->
+    <string name="root_denied">未获得 root 授权，此功能不可用</string>
+    <string name="no_target_selected">请先在「目标应用」里选择要操作的 App</string>
+    <string name="pkg_label">%1$s\n%2$s</string>
 </resources>

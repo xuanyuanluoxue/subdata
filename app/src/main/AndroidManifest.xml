@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- 白名单要从已安装应用里勾选，必须能查询全部包 -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
     <application
         android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.DeviceDefault.Light">
+        android:theme="@style/Theme.SubData">
 
         <!-- LSPosed / Xposed 通过这三条 meta-data 识别模块 -->
         <meta-data
@@ -24,12 +29,28 @@
 
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:label="@string/app_name">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".AppPickerActivity"
+            android:exported="false"
+            android:label="@string/title_app_picker" />
+
+        <activity
+            android:name=".SlotActivity"
+            android:exported="false"
+            android:label="@string/title_slots" />
+
+        <activity
+            android:name=".LogActivity"
+            android:exported="false"
+            android:label="@string/title_log" />
     </application>
 
 </manifest>

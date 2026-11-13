@@ -37,6 +37,12 @@ public final class SlotConfig {
     public static final String CONF_FILE = "subdata.conf";
     public static final String LOG_FILE = "subdata.log";
 
+    /** 写回文件时的稳定顺序，方便人看和 diff。 */
+    private static final String[] CONF_ORDER = {
+            "enabled", "clone_on_first_run", "redirect_external",
+            "hook_file_paths", "hook_data_dir", "slot",
+    };
+
     /** 只允许安全字符，且不能与控制目录同名。 */
     private static final Pattern SLOT_RE = Pattern.compile("[A-Za-z0-9_-]{1,32}");
 
@@ -81,11 +87,11 @@ public final class SlotConfig {
         return new SlotConfig(
                 controlDir,
                 slot,
-                bool(conf.get("enabled"), true),
-                bool(conf.get("clone_on_first_run"), true),
-                bool(conf.get("redirect_external"), true),
-                bool(conf.get("hook_file_paths"), true),
-                bool(conf.get("hook_data_dir"), true));
+                truthy(conf.get("enabled"), true),
+                truthy(conf.get("clone_on_first_run"), true),
+                truthy(conf.get("redirect_external"), true),
+                truthy(conf.get("hook_file_paths"), true),
+                truthy(conf.get("hook_data_dir"), true));
     }
 
     /** 非法 slot 名返回 null（绝不接受 "."、".."、"/" 之类）。 */
@@ -135,27 +141,68 @@ public final class SlotConfig {
     }
 
     static Map<String, String> readConf(File f) {
-        Map<String, String> out = new LinkedHashMap<>();
         if (!f.isFile()) {
-            return out;
+            return new LinkedHashMap<>();
         }
         try (BufferedReader r = new BufferedReader(
                 new InputStreamReader(new FileInputStream(f), StandardCharsets.UTF_8))) {
+            StringBuilder sb = new StringBuilder();
             String line;
             while ((line = r.readLine()) != null) {
-                String s = line.trim();
-                if (s.isEmpty() || s.startsWith("#") || s.startsWith(";")) {
-                    continue;
-                }
-                int eq = s.indexOf('=');
-                if (eq <= 0) {
-                    continue;
-                }
-                out.put(s.substring(0, eq).trim().toLowerCase(), s.substring(eq + 1).trim());
+                sb.append(line).append('\n');
             }
+            return parseConf(sb.toString());
         } catch (Throwable ignored) {
+            return new LinkedHashMap<>();
+        }
+    }
+
+    /**
+     * 解析 key=value 文本。界面侧拿到的内容是 root 读出来的字符串，
+     * 与文件读取共用同一套解析，避免两处规则漂移。
+     */
+    public static Map<String, String> parseConf(String text) {
+        Map<String, String> out = new LinkedHashMap<>();
+        if (text == null || text.isEmpty()) {
+            return out;
+        }
+        for (String raw : text.split("\n")) {
+            String s = raw.trim();
+            if (s.isEmpty() || s.startsWith("#") || s.startsWith(";")) {
+                continue;
+            }
+            int eq = s.indexOf('=');
+            if (eq <= 0) {
+                continue;
+            }
+            out.put(s.substring(0, eq).trim().toLowerCase(), s.substring(eq + 1).trim());
         }
         return out;
+    }
+
+    /** 序列化成稳定顺序的 key=value，供界面写回。 */
+    public static String formatConf(Map<String, String> kv) {
+        StringBuilder sb = new StringBuilder();
+        if (kv != null) {
+            for (String key : CONF_ORDER) {
+                String v = kv.get(key);
+                if (v != null) {
+                    sb.append(key).append('=').append(v.trim()).append('\n');
+                }
+            }
+            for (Map.Entry<String, String> e : kv.entrySet()) {
+                if (contains(CONF_ORDER, e.getKey()) || e.getValue() == null) {
+                    continue;
+                }
+                sb.append(e.getKey()).append('=').append(e.getValue().trim()).append('\n');
+            }
+        }
+        return sb.toString();
+    }
+
+    /** "true/1/yes/on" 视为开；无法识别时用默认值。 */
+    public static boolean truthy(String v, boolean def) {
+        return bool(v, def);
     }
 
     static boolean bool(String v, boolean def) {
@@ -170,6 +217,15 @@ public final class SlotConfig {
             return false;
         }
         return def;
+    }
+
+    private static boolean contains(String[] arr, String key) {
+        for (String s : arr) {
+            if (s.equals(key)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     static void ensureDir(File dir) {

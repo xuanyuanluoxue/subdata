@@ -15,8 +15,8 @@ android {
         applicationId = "com.xavier.subdata"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0-beta"
     }
 
     buildTypes {
@@ -44,4 +44,7 @@ dependencies {
     // Xposed API 只在编译期使用，运行时由宿主框架提供。
     compileOnly(files("libs/xposed-api-82.jar"))
     testImplementation("junit:junit:4.13.2")
+
+    // 界面只依赖 Material Components（自带 appcompat / recyclerview / viewpager2）。
+    implementation("com.google.android.material:material:1.12.0")
 }

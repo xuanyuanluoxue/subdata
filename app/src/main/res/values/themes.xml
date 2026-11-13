@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.SubData" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/subdata_primary</item>
+        <item name="colorSecondary">@color/subdata_secondary</item>
+        <item name="colorError">@color/subdata_danger</item>
+    </style>
+
+    <style name="TextAppearance.SubData.Section" parent="TextAppearance.Material3.TitleMedium">
+        <item name="android:textStyle">bold</item>
+    </style>
+</resources>
