@@ -194,22 +194,35 @@ public final class SlotConfig {
         }
     }
 
+    /**
+     * 写 slot 文件 —— <b>原子</b>：先写 {@code slot.tmp}，fsync 后 rename 覆盖。
+     *
+     * <p>为什么：{@code slot} 是模块唯一的权威配置，写到一半掉电 / 进程被杀会留下空文件或半行，
+     * 下次启动就会退回默认 slot，对用户来说等于「数据不见了」。
+     */
     static void writeSlot(File f, String slot) {
         try {
-            if (f.isFile()) {
-                String cur = readSlot(f);
-                if (slot.equals(cur)) {
-                    return;
-                }
+            if (f.isFile() && slot.equals(readSlot(f))) {
+                return;
             }
-            try (Writer w = new OutputStreamWriter(new FileOutputStream(f, false),
-                    StandardCharsets.UTF_8)) {
-                w.write(slot);
-                w.write('\n');
-            }
+            AtomicFiles.write(f, slot + "\n");
         } catch (Throwable ignored) {
             // 只读环境或首次创建失败都不致命，退回默认 slot
         }
+    }
+
+    /**
+     * 原子写 {@code subdata.conf}。
+     *
+     * <p>界面侧通常走 root 写（{@link TargetRepo}），这里给进程内的写回与测试用，
+     * 两边语义一致：临时文件 + rename。
+     */
+    public static boolean writeConf(File controlDir, String content) {
+        if (controlDir == null) {
+            return false;
+        }
+        ensureDir(controlDir);
+        return AtomicFiles.write(new File(controlDir, CONF_FILE), content);
     }
 
     static Map<String, String> readConf(File f) {

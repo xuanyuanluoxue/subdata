@@ -63,7 +63,7 @@ public final class TargetRepo {
             return false;
         }
         mkdirs(pkg);
-        if (!RootShell.writeFile(confFile(pkg), SlotConfig.formatConf(kv))) {
+        if (!RootShell.writeFileAtomic(confFile(pkg), SlotConfig.formatConf(kv))) {
             return false;
         }
         RootShell.handOverToApp(pkg, confFile(pkg));
@@ -75,7 +75,7 @@ public final class TargetRepo {
             return false;
         }
         mkdirs(pkg);
-        if (!RootShell.writeFile(slotFile(pkg), slot + "\n")) {
+        if (!RootShell.writeFileAtomic(slotFile(pkg), slot + "\n")) {
             return false;
         }
         RootShell.handOverToApp(pkg, slotFile(pkg));

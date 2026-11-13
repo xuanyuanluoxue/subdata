@@ -111,6 +111,25 @@ public final class RootShell {
     }
 
     /**
+     * 原子写（临时文件 + rename）。
+     *
+     * <p>{@code slot} / {@code subdata.conf} 是模块唯一的权威配置，直接 {@code > file} 覆盖时
+     * 掉电或进程被杀会留下空文件/半行，下次启动就退回默认 slot —— 用户看到的是「数据没了」。
+     * {@code mv} 在同一个目录里是原子的：要么旧内容，要么完整的新内容。
+     *
+     * <p>失败时把 {@code .tmp} 删掉，绝不留下可疑文件。
+     */
+    public static boolean writeFileAtomic(String path, String content) {
+        String b64 = Base64.encodeToString(content.getBytes(StandardCharsets.UTF_8),
+                Base64.NO_WRAP);
+        String tmp = path + AtomicFiles.TMP_SUFFIX;
+        String cmd = "echo " + b64 + " | base64 -d > " + shq(tmp)
+                + " && sync && mv -f " + shq(tmp) + " " + shq(path)
+                + " || { rm -f " + shq(tmp) + "; echo FAIL; }";
+        return run(cmd, 10).ok();
+    }
+
+    /**
      * 把由 root 新建的文件归还给目标 App：属主改成目标 uid，权限 0644，
      * 并让 SELinux 标签经 restorecon 归位（否则被注入的 App 读自己目录会被拒）。
      */

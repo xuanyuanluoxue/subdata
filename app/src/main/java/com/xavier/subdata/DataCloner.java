@@ -10,10 +10,13 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * 首次切到某个 slot 时，从默认数据目录克隆一份冷数据。
+ * 首次切到某个 slot 时，从默认数据目录（CE）克隆一份冷数据。
  *
- * <p>只做一次性 best-effort 拷贝：单个文件失败不影响其它文件，
- * 拷贝完成会写 {@code .cloned} 标记，避免每次冷启动重复扫描。</p>
+ * <p>v0.3.1 起接入 {@link SlotState}：克隆前写 {@code .cloning-<slot>}，成功才写
+ * {@code .cloned-<slot>}；下次启动看到 {@code .cloning} 残留就知道上次没做完，
+ * 直接清掉重做，绝不把半成品当成品。
+ *
+ * <p>只做一次性 best-effort 拷贝：单个文件失败不影响其它文件。
  */
 public final class DataCloner {
 
@@ -28,30 +31,47 @@ public final class DataCloner {
         SKIP.add("no_backup");
     }
 
-    private static final String MARKER = ".cloned";
-
     private DataCloner() {
     }
 
     /**
+     * 确保 slot 目录存在且已完整克隆。
+     *
      * @return true 表示这次真的执行了克隆
      */
     public static boolean ensureSlot(File dataDir, String slot, StringBuilder log) {
-        if (dataDir == null || slot == null || slot.isEmpty()) {
+        final String s = SlotConfig.sanitize(slot);
+        if (dataDir == null || s == null) {
             return false;
         }
-        File controlDir = new File(dataDir, PathMap.CONTROL_DIR);
-        File dst = new File(controlDir, slot);
-        if (dst.isDirectory()) {
-            if (!new File(dst, MARKER).isFile()) {
-                touch(new File(dst, MARKER));
-            }
+        final File controlDir = SlotState.controlDir(dataDir);
+        final File dst = new File(controlDir, s);
+
+        final SlotState.Phase phase = SlotState.phase(dataDir, s);
+        if (phase == SlotState.Phase.CLONED) {
             return false;
         }
+        if (phase == SlotState.Phase.SKIPPED) {
+            append(log, "slot " + s + " was skipped (" + SlotState.skipReason(dataDir, s) + "), keep");
+            return false;
+        }
+        if (phase == SlotState.Phase.CLONING) {
+            // 上次克隆没做完：这个槽从来没有「完成」过，清掉重做
+            SlotState.recoverHalfCloned(dataDir, s);
+            append(log, "recover half-cloned slot " + s + " (wiped, recloning)");
+        } else if (dst.isDirectory()) {
+            // 目录已经在但不带 .cloning：0.3.0 及更早建的槽（可能是骨架槽），
+            // 不能盲目重拷，补标记后当成品。
+            SlotState.complete(dataDir, s);
+            append(log, "slot " + s + " exists without marker, adopt as cloned");
+            return false;
+        }
+
         if (!dst.mkdirs() && !dst.isDirectory()) {
             append(log, "mkdirs failed: " + dst);
             return false;
         }
+        SlotState.begin(dataDir, s);
         long start = System.currentTimeMillis();
         int[] counters = new int[2];
         File[] children = dataDir.listFiles();
@@ -63,7 +83,7 @@ public final class DataCloner {
                 copyTree(child, new File(dst, child.getName()), counters);
             }
         }
-        touch(new File(dst, MARKER));
+        SlotState.complete(dataDir, s);
         append(log, "cloned " + counters[0] + " files, " + counters[1] + " dirs into " + dst
                 + " in " + (System.currentTimeMillis() - start) + "ms");
         return true;
@@ -108,16 +128,6 @@ public final class DataCloner {
             }
             out.flush();
         } catch (IOException ignored) {
-        }
-    }
-
-    private static void touch(File f) {
-        try {
-            if (!f.isFile() && !f.createNewFile()) {
-                return;
-            }
-        } catch (IOException ignored) {
-            return;
         }
     }
 
