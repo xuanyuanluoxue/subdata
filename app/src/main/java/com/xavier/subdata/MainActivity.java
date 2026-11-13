@@ -361,7 +361,7 @@ public class MainActivity extends AppCompatActivity {
                 break;
         }
         String body = i.slot == null ? getString(res) : getString(res, i.slot);
-        return total > 1 ? body + " " + getString(R.string.health_more, total - 1) : body;
+        return total > 1 ? body + getString(R.string.health_more, total - 1) : body;
     }
 
     // ------------------------------------------------------------------ 写入
