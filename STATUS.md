@@ -100,3 +100,6 @@
 
 模块 App 的 mount namespace 被裁剪（`/data/data` 仅 3 条），`test -d /data/data/mark.via` 返回 1。
 `RootShell` 增加 `nsenter -t 1 -m` 自动逃逸（探测可用才启用），修复后 `slots.list` 正常返回体积。
+
+另修：进程重启后 SharedPreferences 读到空表，导致「局域网」开关自己变回开。安全开关改为
+`files/mcp.lan`（fail-closed：读不到按关），实测 40s 内稳定 `127.0.0.1`，局域网 IP 连接被拒。

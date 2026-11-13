@@ -63,12 +63,46 @@ public final class McpManager {
         return true;
     }
 
+    /**
+     * 是否允许局域网访问。
+     *
+     * <p><b>故意不用 SharedPreferences。</b>实测在这台机器上，重启进程后 SharedPreferences 会读到
+     * 空表（文件内容没问题，root 和 run-as 都能看到），于是「局域网开关」会在重启后自己变回 true ——
+     * 一个安全开关绝对不能有这种不确定性。改成普通文件 {@code files/mcp.lan}：
+     * 读不到、内容不对、读失败，一律按「关闭」处理（fail-closed）。
+     */
     public static boolean lan(Context ctx) {
-        return prefs(ctx).getBoolean(KEY_LAN, false);
+        File f = lanFlagFile(ctx);
+        if (!f.isFile()) {
+            return false;
+        }
+        try {
+            byte[] buf = new byte[16];
+            try (java.io.FileInputStream in = new java.io.FileInputStream(f)) {
+                int n = in.read(buf);
+                if (n <= 0) {
+                    return false;
+                }
+                return "1".equals(new String(buf, 0, n, "UTF-8").trim());
+            }
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     public static void setLan(Context ctx, boolean on) {
+        File f = lanFlagFile(ctx);
+        try {
+            AtomicFiles.write(f, on ? "1\n" : "0\n");
+        } catch (Throwable ignored) {
+            // 写不进去就保持关闭语义
+        }
+        // 兼容旧版本读过 prefs 的情况，顺手同步一份（不影响判定）
         prefs(ctx).edit().putBoolean(KEY_LAN, on).apply();
+    }
+
+    public static File lanFlagFile(Context ctx) {
+        return new File(ctx.getFilesDir(), "mcp.lan");
     }
 
     // ------------------------------------------------------------------ token

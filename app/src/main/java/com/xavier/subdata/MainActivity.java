@@ -601,8 +601,15 @@ public class MainActivity extends AppCompatActivity {
                 ? ((Number) st.get("auth_failures")).longValue() : 0;
 
         mcpBinding = true;
-        swMcpEnabled.setChecked(enabled);
-        swMcpLan.setChecked(McpManager.lan(this));
+        // 只在真的不一致时才 setChecked：MaterialSwitch 在动画/布局期间被重设状态时
+        // 可能补发一次 onCheckedChanged，绕过 mcpBinding 守卫，把刚关掉的开关又写回 true。
+        if (swMcpEnabled.isChecked() != enabled) {
+            swMcpEnabled.setChecked(enabled);
+        }
+        boolean lan = McpManager.lan(this);
+        if (swMcpLan.isChecked() != lan) {
+            swMcpLan.setChecked(lan);
+        }
         if (!etMcpPort.hasFocus()) {
             etMcpPort.setText(String.valueOf(McpManager.port(this)));
         }

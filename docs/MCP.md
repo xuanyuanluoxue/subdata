@@ -63,6 +63,9 @@ curl -s http://127.0.0.1:8773/mcp ...
 - UI 可「复制 / 重置」；重置后旧客户端全部 401
 - 比较用 `MessageDigest.isEqual`（常量时间）
 
+局域网开关**不用 SharedPreferences**，而是 `files/mcp.lan`（`1` 开 / `0` 关，读不到一律按关）。
+原因：实测重启进程后 SharedPreferences 会读到空表，安全开关不能有这种不确定性（fail-closed）。
+
 ---
 
 ## 3. 工具清单
@@ -193,6 +196,7 @@ mcp-proxy --url http://127.0.0.1:8773/mcp --header "Authorization: Bearer $TOKEN
 | 连不上（电脑） | `adb forward --list`；服务是否「运行中」；关掉再打开开关 |
 | 请求 0 次但显示运行中 | 端口可能被别的进程占用：改端口后重新启用 |
 | `目标 App 不可用（未安装或数据目录不可读）` | 见第 7 节 namespace 问题 |
+| 明明关了局域网却在听 `0.0.0.0` | 检查 `files/mcp.lan` 是否为 `0`；旧版本读 SharedPreferences 会残留 true |
 | App 被杀后客户端超时 | 前台服务应保持常驻；确认通知栏有「SubData MCP 运行中」 |
 
 日志：模块私有目录 `files/mcp.log`（超过 512 KiB 轮转成 `mcp.log.1`），记录启动、每条请求的方法/工具/耗时、
