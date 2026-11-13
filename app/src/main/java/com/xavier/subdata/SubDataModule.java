@@ -167,6 +167,21 @@ public class SubDataModule implements IXposedHookLoadPackage, IXposedHookZygoteI
                     + (deDir == null || deDir.isEmpty() ? " (no DE base)" : " de=" + deDir));
         }
 
+        // EXT 树：真机上 Via 的壁纸在 Android/data/<pkg>/files/content 里，
+        // 只克隆 CE 会导致换槽后壁纸丢失（上一轮手工拷了 83MB 才恢复）。
+        // 注意顺序：必须在 PathMap 装上之前做，否则拷贝时读到的已经是重定向后的路径。
+        if (cfg.redirectExternal) {
+            try {
+                final File extRoot = new File("/storage/emulated/0/Android/data/" + pkg);
+                final ExtCloner.Report ext = ExtCloner.ensure(extRoot, cfg.slot, cfg.cloneOnFirstRun);
+                if (ext.noteworthy()) {
+                    logFile(pkg + ": " + ext.summary());
+                }
+            } catch (Throwable t) {
+                logFile(pkg + ": ext clone failed: " + t);
+            }
+        }
+
         final List<String> bases = buildBases(pkg, dataDir, lp.appInfo, cfg.redirectExternal);
         final PathMap map = new PathMap(cfg.slot, bases);
         sMap = map;
