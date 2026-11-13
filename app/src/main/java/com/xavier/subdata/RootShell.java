@@ -23,6 +23,7 @@ public final class RootShell {
     public static final int DEFAULT_TIMEOUT_SEC = 12;
 
     private static Boolean sAvailable;
+    private static Boolean sEscape;
 
     private RootShell() {
     }
@@ -48,10 +49,38 @@ public final class RootShell {
     /** su 是否真的能拿到 uid 0（结果缓存，只探测一次）。 */
     public static synchronized boolean available() {
         if (sAvailable == null) {
-            Result r = run("id", 8);
+            Result r = rawRun("id", 8);
             sAvailable = r.ok() && r.out.contains("uid=0");
         }
         return sAvailable;
+    }
+
+    /**
+     * 是否需要切到 init 的 mount namespace 才能看到别家 App 的 /data/data。
+     *
+     * <p>实测（小米 Android 17 + KernelSU + Vector）：模块 App 自己的 mount namespace
+     * 里 {@code /data/data} 只剩 3 个条目（gms / 自己 / aiservice），目标 App 的目录
+     * 整个不可见 —— 于是 {@code test -d /data/data/mark.via} 返回 1，界面上表现为
+     * 「目标 App 未安装」，槽切换全部失败。<b>这不是权限问题，是 namespace 被裁剪。</b>
+     *
+     * <p>用 {@code nsenter -t 1 -m} 回到 init 的全局 namespace 就正常（493 个条目）。
+     * 探测一次 {@code true} 是否可执行，可执行就所有命令都包一层；不可执行（老 ROM /
+     * 没有 toybox nsenter）就退回原样，行为与历史版本一致。
+     */
+    public static synchronized boolean needsNamespaceEscape() {
+        if (sEscape == null) {
+            Result r = rawRun("nsenter -t 1 -m -- /system/bin/true && echo nsok", 6);
+            sEscape = r.out.contains("nsok");
+        }
+        return sEscape;
+    }
+
+    /** 把命令包一层 nsenter（如果这台机器需要）。 */
+    static String wrap(String cmd) {
+        if (!needsNamespaceEscape()) {
+            return cmd;
+        }
+        return "nsenter -t 1 -m -- /system/bin/sh -c " + shq(cmd);
     }
 
     public static Result run(String cmd) {
@@ -59,6 +88,11 @@ public final class RootShell {
     }
 
     public static Result run(String cmd, int timeoutSec) {
+        return rawRun(wrap(cmd), timeoutSec);
+    }
+
+    /** 不包 nsenter 的裸执行：用于 nsenter 自身可用性探测与 su 能力探测。 */
+    static Result rawRun(String cmd, int timeoutSec) {
         Process p = null;
         try {
             p = new ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start();

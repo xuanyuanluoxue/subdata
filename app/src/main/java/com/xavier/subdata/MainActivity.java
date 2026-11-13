@@ -1,5 +1,7 @@
 package com.xavier.subdata;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
@@ -7,6 +9,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
+import android.widget.EditText;
 import android.widget.TextView;
 
 import androidx.annotation.Nullable;
@@ -53,6 +56,16 @@ public class MainActivity extends AppCompatActivity {
     private ChipGroup chipsSlots;
 
     private MaterialButton btnRefresh;
+
+    // ---- MCP 服务（v0.4.0）
+    private TextView tvMcpStatus;
+    private TextView tvMcpDetail;
+    private TextView tvMcpToken;
+    private MaterialSwitch swMcpEnabled;
+    private MaterialSwitch swMcpLan;
+    private EditText etMcpPort;
+    /** 程序化回填 MCP 开关时不要触发保存与重启服务。 */
+    private boolean mcpBinding;
 
     /** 最近一次读到的槽目录与体积，供 chip 点按时使用。 */
     private List<String> slotNames = new ArrayList<>();
@@ -115,6 +128,7 @@ public class MainActivity extends AppCompatActivity {
         bindSwitch(R.id.row_island, "island_notice",
                 R.string.switch_island_title, R.string.switch_island_desc);
 
+        bindMcp();
         showVersion();
         ensureNotificationPermission();
         reload();
@@ -148,6 +162,7 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         // 从白名单 / slot 页回来要重新读
         reload();
+        renderMcp();
     }
 
     @Override
@@ -454,6 +469,157 @@ public class MainActivity extends AppCompatActivity {
                 reload();
             });
         });
+    }
+
+    // ------------------------------------------------------------------ MCP 服务
+
+    /**
+     * 绑定 MCP 区块：开关、端口、令牌、状态。
+     *
+     * <p>服务本身跑在模块进程里（{@link McpManager} 单例），界面只是它的遥控器：
+     * 每次改动都先落 SharedPreferences，再 {@link McpManager#sync} 对齐，最后重画状态。
+     * 这样即使绑定失败（端口被占），界面也不会崩，只会显示「启动失败：…」。
+     */
+    private void bindMcp() {
+        tvMcpStatus = findViewById(R.id.tv_mcp_status);
+        tvMcpDetail = findViewById(R.id.tv_mcp_detail);
+        tvMcpToken = findViewById(R.id.tv_mcp_token);
+        etMcpPort = findViewById(R.id.et_mcp_port);
+
+        View enabledRow = findViewById(R.id.row_mcp_enabled);
+        ((TextView) enabledRow.findViewById(R.id.sw_title)).setText(R.string.mcp_switch_title);
+        ((TextView) enabledRow.findViewById(R.id.sw_desc)).setText(R.string.mcp_switch_desc);
+        swMcpEnabled = enabledRow.findViewById(R.id.sw_toggle);
+        swMcpEnabled.setOnCheckedChangeListener((b, checked) -> {
+            if (mcpBinding) {
+                return;
+            }
+            McpManager.setEnabled(this, checked);
+            applyMcp();
+        });
+
+        View lanRow = findViewById(R.id.row_mcp_lan);
+        ((TextView) lanRow.findViewById(R.id.sw_title)).setText(R.string.mcp_lan_title);
+        ((TextView) lanRow.findViewById(R.id.sw_desc)).setText(R.string.mcp_lan_desc);
+        swMcpLan = lanRow.findViewById(R.id.sw_toggle);
+        swMcpLan.setOnCheckedChangeListener((b, checked) -> {
+            if (mcpBinding) {
+                return;
+            }
+            if (!checked) {
+                McpManager.setLan(this, false);
+                applyMcp();
+                return;
+            }
+            // 打开局域网必须先过一道风险确认
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle(R.string.mcp_lan_title_dialog)
+                    .setMessage(R.string.mcp_lan_msg)
+                    .setNegativeButton(R.string.cancel, (d, w) -> {
+                        mcpBinding = true;
+                        b.setChecked(false);
+                        mcpBinding = false;
+                    })
+                    .setPositiveButton(R.string.mcp_lan_title, (d, w) -> {
+                        McpManager.setLan(this, true);
+                        applyMcp();
+                    })
+                    .show();
+        });
+
+        findViewById(R.id.btn_mcp_refresh).setOnClickListener(v -> applyMcp());
+
+        findViewById(R.id.btn_mcp_apply).setOnClickListener(v -> {
+            int p;
+            try {
+                p = Integer.parseInt(etMcpPort.getText().toString().trim());
+            } catch (Throwable t) {
+                toast(getString(R.string.mcp_port_bad));
+                return;
+            }
+            if (!McpManager.setPort(this, p)) {
+                toast(getString(R.string.mcp_port_bad));
+                return;
+            }
+            toast(getString(R.string.mcp_port_saved));
+            applyMcp();
+        });
+
+        findViewById(R.id.btn_mcp_copy).setOnClickListener(v -> {
+            String token = McpManager.token(this);
+            try {
+                ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                if (cm != null) {
+                    cm.setPrimaryClip(ClipData.newPlainText("subdata mcp token", token));
+                    toast(getString(R.string.mcp_copied));
+                }
+            } catch (Throwable t) {
+                toast(getString(R.string.mcp_port_bad));
+            }
+        });
+
+        findViewById(R.id.btn_mcp_reset).setOnClickListener(v ->
+                new MaterialAlertDialogBuilder(this)
+                        .setTitle(R.string.mcp_reset_title)
+                        .setMessage(R.string.mcp_reset_msg)
+                        .setNegativeButton(R.string.cancel, null)
+                        .setPositiveButton(R.string.mcp_reset, (d, w) -> {
+                            McpManager.resetToken(this);
+                            toast(getString(R.string.mcp_reset_ok));
+                            applyMcp();
+                        })
+                        .show());
+
+        renderMcp();
+        applyMcp();
+    }
+
+    /** 把设置对齐到运行中的服务（后台线程，避免绑定端口时卡界面）。 */
+    private void applyMcp() {
+        io.execute(() -> {
+            try {
+                McpManager.sync(getApplicationContext());
+            } catch (Throwable t) {
+                android.util.Log.e("SubDataMcp", "applyMcp failed", t);
+            }
+            ui.post(this::renderMcp);
+        });
+    }
+
+    private void renderMcp() {
+        if (isFinishing() || isDestroyed() || tvMcpStatus == null) {
+            return;
+        }
+        Map<String, Object> st = McpManager.statusMap(this);
+        boolean running = Boolean.TRUE.equals(st.get("running"));
+        boolean enabled = Boolean.TRUE.equals(st.get("enabled"));
+        Object err = st.get("error");
+        Object host = st.get("host");
+        long port = st.get("port") instanceof Number ? ((Number) st.get("port")).longValue() : 0;
+        long req = st.get("requests") instanceof Number ? ((Number) st.get("requests")).longValue() : 0;
+        long auth = st.get("auth_failures") instanceof Number
+                ? ((Number) st.get("auth_failures")).longValue() : 0;
+
+        mcpBinding = true;
+        swMcpEnabled.setChecked(enabled);
+        swMcpLan.setChecked(McpManager.lan(this));
+        if (!etMcpPort.hasFocus()) {
+            etMcpPort.setText(String.valueOf(McpManager.port(this)));
+        }
+        mcpBinding = false;
+
+        if (running) {
+            tvMcpStatus.setText(getString(R.string.mcp_status_running,
+                    String.valueOf(host), port));
+        } else if (enabled && err != null) {
+            tvMcpStatus.setText(getString(R.string.mcp_status_error, String.valueOf(err)));
+        } else {
+            tvMcpStatus.setText(R.string.mcp_status_stopped);
+        }
+        tvMcpDetail.setText(getString(R.string.mcp_detail, req, auth));
+        tvMcpToken.setText(McpManager.token(this));
+        swMcpLan.setEnabled(enabled);
+        etMcpPort.setEnabled(enabled);
     }
 
     // ------------------------------------------------------------------ 小工具
