@@ -1,6 +1,8 @@
 package com.xavier.subdata;
 
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -62,6 +64,9 @@ public class MainActivity extends AppCompatActivity {
     /** 程序化回填时不要把改动当成用户操作写回文件。 */
     private boolean binding;
 
+    /** 通知权限申请的请求码。 */
+    private static final int REQ_NOTIFY = 0x5B01;
+
     private String pkg;
     private Map<String, String> conf = new LinkedHashMap<>();
 
@@ -111,7 +116,31 @@ public class MainActivity extends AppCompatActivity {
                 R.string.switch_island_title, R.string.switch_island_desc);
 
         showVersion();
+        ensureNotificationPermission();
         reload();
+    }
+
+    /**
+     * 申请通知权限（API 33+ 的运行时权限）。
+     *
+     * <p>v0.3.1 起超级岛通知由<b>模块 App 自己</b>发（目标 App 没有
+     * {@code POST_PROMOTED_NOTIFICATIONS}，发出去也上不了岛），所以模块 App 必须有
+     * {@code POST_NOTIFICATIONS}。这里只在第一次进首页时问一次，被拒也不影响其它功能——
+     * 通知相关的地方都会自己判断权限并静默跳过。
+     */
+    private void ensureNotificationPermission() {
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                return;
+            }
+            if (checkSelfPermission(ModuleMeta.PERM_POST_NOTIFICATIONS)
+                    == PackageManager.PERMISSION_GRANTED) {
+                return;
+            }
+            requestPermissions(new String[]{ModuleMeta.PERM_POST_NOTIFICATIONS}, REQ_NOTIFY);
+        } catch (Throwable ignored) {
+            // 个别 ROM 上 requestPermissions 会抛，忽略即可
+        }
     }
 
     @Override

@@ -4,6 +4,13 @@
     <!-- 白名单要从已安装应用里勾选，必须能查询全部包 -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
+    <!-- v0.3.1：超级岛改由模块 App 自己发通知，所以权限也得由模块 App 声明 -->
+    <!-- 普通通知（API 33+ 运行时权限，进入 App 时会申请一次） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 小米 / HyperOS 的「可上岛」权限：普通 App 声明后系统自动授予；
+         拿不到也不影响别的功能，通知会退化成「只带 extras 尽力上岛」 -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
@@ -22,6 +29,8 @@
         <meta-data
             android:name="xposedminversion"
             android:value="82" />
+        <!-- v0.3.1 关键修复：没有这一条，目标进程用 XSharedPreferences 读模块 prefs
+             永远读到空值（白名单形同虚设），上一轮只能改代码里的 DEFAULT_TARGETS 才生效 -->
         <meta-data
             android:name="xposedsharedprefs"
             android:value="true" />
@@ -54,6 +63,18 @@
             android:name=".LogActivity"
             android:exported="false"
             android:label="@string/title_log" />
+
+        <!-- v0.3.1：超级岛状态同步。目标 App 的进程只发显式广播过来，
+             由模块 App 用自己的包名（带 POST_PROMOTED_NOTIFICATIONS）post 通知。
+             exported=true 是必须的（跨 App 发送），安全性由 onReceive 里的
+             getSendingUid() + 白名单校验保证，见 IslandReceiver。 -->
+        <receiver
+            android:name=".IslandReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.xavier.subdata.action.ISLAND_STATE" />
+            </intent-filter>
+        </receiver>
 
         <!-- 诊断包分享：把 App 外部私有目录里的报告临时授权给分享目标读取 -->
         <provider
