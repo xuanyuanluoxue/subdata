@@ -1,0 +1,105 @@
+name: Android CI
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Unit tests + debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          export PATH="$SDK/cmdline-tools/latest/bin:$SDK/platform-tools:$PATH"
+          (yes | sdkmanager --licenses > /dev/null 2>&1) || true
+          sdkmanager --install "platform-tools" "platforms;android-37" "build-tools;37.0.0"
+
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest --no-daemon --console=plain
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --no-daemon --console=plain
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: subdata-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: '**/build/reports/tests/**'
+          if-no-files-found: ignore
+
+  release:
+    name: Release APK (tags only)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          export PATH="$SDK/cmdline-tools/latest/bin:$SDK/platform-tools:$PATH"
+          (yes | sdkmanager --licenses > /dev/null 2>&1) || true
+          sdkmanager --install "platform-tools" "platforms;android-37" "build-tools;37.0.0"
+
+      - name: Build release APK
+        run: ./gradlew assembleRelease --no-daemon --console=plain
+
+      - name: Rename artifact
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          cp app/build/outputs/apk/release/app-release.apk "subdata-${VER}-release.apk"
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: subdata-release-apk
+          path: subdata-*-release.apk
+          if-no-files-found: error
