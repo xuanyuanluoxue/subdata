@@ -117,6 +117,36 @@
     <string name="log_no_root">需要 root 才能读取 /data/data 下的日志</string>
     <string name="log_clear_confirm">清空 subdata.log？不影响任何数据，只是删掉文本记录。</string>
 
+    <!-- 健康检查（v0.3.0） -->
+    <string name="health_slot_missing_no_clone">⚠ 当前副本 %1$s 还没有数据目录，且「首次运行克隆」是关的，目标应用可能起不来</string>
+    <string name="health_slot_missing_will_clone">ℹ 当前副本 %1$s 还没有数据目录，首次启动会自动克隆一份</string>
+    <string name="health_disabled">ℹ 模块对该应用已停用，正在直接使用原始数据目录</string>
+    <string name="health_hooks_narrow">⚠ 两个兜底 hook 都关了，只有部分路径会被重定向</string>
+    <string name="health_no_slots">⚠ 一个副本目录都没有，等目标 App 启动一次就会自动建</string>
+    <string name="health_external">ℹ 已开启外部存储重定向，部分应用的外部缓存会翻倍</string>
+    <string name="health_slot_conflict">ℹ 配置文件里的 slot 与当前实际副本不一致，以实际副本 %1$s 为准</string>
+    <string name="health_conf_empty">ℹ 还没有配置文件，当前用的是默认设置</string>
+    <string name="health_more">（另有 %1$d 条）</string>
+
+    <!-- 一键切换 / 删槽（v0.3.0） -->
+    <string name="slot_already_current">已经在副本 %1$s 上了</string>
+    <string name="slot_switch_confirm_stop">切换到副本 %1$s？\n\n切换后会自动强制停止目标应用，重新打开才生效。\n原始账号数据一直在原处，随时切回来即可找回。</string>
+    <string name="slot_delete">删除此副本</string>
+    <string name="slot_delete_yes">删除</string>
+    <string name="slot_delete_confirm">将删除副本 %1$s（约 %2$s）。\n\n· 只删这一份副本目录\n· 该副本里的登录状态会丢失，需要重新登录\n· 其它副本和原始数据不受影响</string>
+    <string name="slot_delete_confirm2">这一步不可撤销。确定删除副本 %1$s 吗？</string>
+    <string name="slot_delete_current">%1$s 是当前正在使用的副本，不能删。请先切换到别的副本再删除。</string>
+    <string name="slot_deleted">已删除副本 %1$s</string>
+    <string name="slot_delete_fail">删除失败：%1$s</string>
+
+    <!-- 诊断包（v0.3.0） -->
+    <string name="diag_export">导出诊断包</string>
+    <string name="diag_saved">诊断包已保存：%1$s</string>
+    <string name="diag_failed">导出失败：%1$s</string>
+    <string name="diag_no_dir">没有可写的外部目录</string>
+    <string name="diag_subject">SubData 诊断包</string>
+    <string name="diag_share">分享诊断包</string>
+
     <!-- root 相关 -->
     <string name="root_denied">未获得 root 授权，此功能不可用</string>
     <string name="no_target_selected">请先在「目标应用」里选择要操作的 App</string>

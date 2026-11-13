@@ -13,9 +13,13 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.google.android.material.chip.Chip;
+import com.google.android.material.chip.ChipGroup;
 import com.google.android.material.materialswitch.MaterialSwitch;
 import com.google.android.material.snackbar.Snackbar;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,8 +47,14 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvTargetSummary;
     private TextView tvSlotSummary;
     private TextView tvLogPreview;
+    private TextView tvHealth;
+    private ChipGroup chipsSlots;
 
     private MaterialButton btnRefresh;
+
+    /** 最近一次读到的槽目录与体积，供 chip 点按时使用。 */
+    private List<String> slotNames = new ArrayList<>();
+    private Map<String, Long> slotSizes = new LinkedHashMap<>();
 
     /** conf key -> 开关控件（顺序即界面顺序）。 */
     private final Map<String, MaterialSwitch> switches = new LinkedHashMap<>();
@@ -74,6 +84,8 @@ public class MainActivity extends AppCompatActivity {
         tvTargetSummary = findViewById(R.id.tv_target_summary);
         tvSlotSummary = findViewById(R.id.tv_slot_summary);
         tvLogPreview = findViewById(R.id.tv_log_preview);
+        tvHealth = findViewById(R.id.tv_health);
+        chipsSlots = findViewById(R.id.chips_slots);
         btnRefresh = findViewById(R.id.btn_refresh);
 
         btnRefresh.setOnClickListener(v -> reload());
@@ -151,6 +163,8 @@ public class MainActivity extends AppCompatActivity {
             String slot = null;
             Map<String, String> c = TargetRepo.defaultConf();
             String log = "";
+            List<String> names = new ArrayList<>();
+            Map<String, Long> sizes = new LinkedHashMap<>();
             if (root && target != null) {
                 installed = TargetRepo.appInstalled(target);
                 if (installed) {
@@ -160,18 +174,23 @@ public class MainActivity extends AppCompatActivity {
                         c.putAll(onDisk);
                     }
                     log = TargetRepo.readLog(target);
+                    names = TargetRepo.listSlots(target);
+                    sizes = TargetRepo.slotSizes(target);
                 }
             }
             final boolean fInstalled = installed;
             final String fSlot = slot;
             final Map<String, String> fConf = c;
             final String fLog = log;
-            ui.post(() -> render(target, root, fInstalled, fSlot, fConf, fLog));
+            final List<String> fNames = names;
+            final Map<String, Long> fSizes = sizes;
+            ui.post(() -> render(target, root, fInstalled, fSlot, fConf, fLog, fNames, fSizes));
         });
     }
 
     private void render(String target, boolean root, boolean installed, String slot,
-                        Map<String, String> c, String log) {
+                        Map<String, String> c, String log,
+                        List<String> names, Map<String, Long> sizes) {
         if (isFinishing() || isDestroyed()) {
             return;
         }
@@ -229,12 +248,120 @@ public class MainActivity extends AppCompatActivity {
         }
         binding = false;
 
-        int slotCount = 0;
-        if (root && target != null) {
-            slotCount = TargetRepo.listSlots(target).size();
-        }
+        slotNames = names == null ? new ArrayList<>() : names;
+        slotSizes = sizes == null ? new LinkedHashMap<>() : sizes;
+
+        int slotCount = root && target != null ? slotNames.size() : 0;
         tvSlotSummary.setText(getString(R.string.slot_summary_with_current,
                 slot == null ? getString(R.string.value_none) : slot, slotCount));
+
+        renderChips(root && target != null, slot);
+        renderHealth(c, slot, slotNames);
+    }
+
+    /** 首页直接把槽列成 chip，点一下就能切，省掉「进二级页 → 找 → 确认」。 */
+    private void renderChips(boolean usable, String current) {
+        chipsSlots.removeAllViews();
+        if (!usable || slotNames.isEmpty()) {
+            chipsSlots.setVisibility(View.GONE);
+            return;
+        }
+        chipsSlots.setVisibility(View.VISIBLE);
+        for (final String name : slotNames) {
+            Chip chip = new Chip(this);
+            chip.setText(SlotStats.label(name, SlotStats.sizeOf(slotSizes, name)));
+            chip.setCheckable(true);
+            chip.setChecked(name.equals(current));
+            chip.setChipIconVisible(false);
+            chip.setOnClickListener(v -> askSwitch(name, current));
+            chipsSlots.addView(chip);
+        }
+    }
+
+    private void askSwitch(final String slot, String current) {
+        if (slot.equals(current)) {
+            toast(getString(R.string.slot_already_current, slot));
+            return;
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.section_slot)
+                .setMessage(getString(R.string.slot_switch_confirm_stop, slot))
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.slot_switch, (d, w) -> doSwitch(slot))
+                .show();
+    }
+
+    private void doSwitch(final String slot) {
+        final String target = pkg;
+        if (target == null) {
+            toast(getString(R.string.no_target_selected));
+            return;
+        }
+        io.execute(() -> {
+            final boolean ok = TargetRepo.switchAndStop(target, slot);
+            ui.post(() -> {
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+                toast(ok ? getString(R.string.slot_switched, slot)
+                        : getString(R.string.switch_write_fail, getString(R.string.root_denied)));
+                reload();
+            });
+        });
+    }
+
+    /** 体检结论：只显示最严重的那一条，避免首页被塞成日志。 */
+    private void renderHealth(Map<String, String> c, String slot, List<String> names) {
+        List<HealthCheck.Issue> issues = HealthCheck.inspect(c, slot,
+                names == null ? Collections.<String>emptyList() : names);
+        HealthCheck.Level worst = HealthCheck.worst(issues);
+        if (worst == null) {
+            tvHealth.setVisibility(View.GONE);
+            return;
+        }
+        HealthCheck.Issue top = issues.get(0);
+        tvHealth.setVisibility(View.VISIBLE);
+        tvHealth.setText(healthText(top, issues.size()));
+        if (worst == HealthCheck.Level.DANGER) {
+            tvHealth.setTextColor(getColor(R.color.subdata_danger));
+        } else if (worst == HealthCheck.Level.WARN) {
+            tvHealth.setTextColor(getColor(R.color.subdata_secondary));
+        } else {
+            tvHealth.setTextColor(getColor(R.color.subdata_primary));
+        }
+    }
+
+    private String healthText(HealthCheck.Issue i, int total) {
+        int res;
+        switch (i.code) {
+            case SLOT_DIR_MISSING_NO_CLONE:
+                res = R.string.health_slot_missing_no_clone;
+                break;
+            case SLOT_DIR_MISSING_WILL_CLONE:
+                res = R.string.health_slot_missing_will_clone;
+                break;
+            case MODULE_DISABLED:
+                res = R.string.health_disabled;
+                break;
+            case HOOKS_TOO_NARROW:
+                res = R.string.health_hooks_narrow;
+                break;
+            case NO_SLOTS:
+                res = R.string.health_no_slots;
+                break;
+            case EXTERNAL_DOUBLED:
+                res = R.string.health_external;
+                break;
+            case SLOT_CONFLICT:
+                res = R.string.health_slot_conflict;
+                break;
+            case CONF_EMPTY:
+            default:
+                res = R.string.health_conf_empty;
+                break;
+        }
+        String body = i.slot == null ? getString(res) : getString(res, i.slot);
+        return total > 1 ? body + " " + getString(R.string.health_more, total - 1) : body;
     }
 
     // ------------------------------------------------------------------ 写入

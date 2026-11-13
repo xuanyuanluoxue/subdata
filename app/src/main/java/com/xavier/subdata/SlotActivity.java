@@ -23,7 +23,9 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.snackbar.Snackbar;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -39,6 +41,8 @@ public class SlotActivity extends AppCompatActivity {
     private final Handler ui = new Handler(Looper.getMainLooper());
 
     private final List<String> slots = new ArrayList<>();
+    /** slot -> 占用字节；没统计到的槽不在表里。 */
+    private final Map<String, Long> sizes = new LinkedHashMap<>();
     private String current;
     private String pkg;
 
@@ -83,12 +87,15 @@ public class SlotActivity extends AppCompatActivity {
         io.execute(() -> {
             boolean root = RootShell.available();
             List<String> list = new ArrayList<>();
+            Map<String, Long> sizeMap = new LinkedHashMap<>();
             String cur = null;
             if (root && target != null) {
                 list.addAll(TargetRepo.listSlots(target));
                 cur = TargetRepo.readSlot(target);
+                sizeMap = TargetRepo.slotSizes(target);
             }
             final List<String> fList = list;
+            final Map<String, Long> fSizes = sizeMap;
             final String fCur = cur;
             final boolean fRoot = root;
             ui.post(() -> {
@@ -97,6 +104,8 @@ public class SlotActivity extends AppCompatActivity {
                 }
                 slots.clear();
                 slots.addAll(fList);
+                sizes.clear();
+                sizes.putAll(fSizes);
                 current = fCur;
                 adapter.notifyDataSetChanged();
                 boolean empty = slots.isEmpty();
@@ -152,13 +161,16 @@ public class SlotActivity extends AppCompatActivity {
         List<String> items = new ArrayList<>();
         items.add(getString(R.string.slot_switch));
         items.add(getString(R.string.slot_rename));
+        items.add(getString(R.string.slot_delete));
         new MaterialAlertDialogBuilder(this)
                 .setTitle(slot)
                 .setItems(items.toArray(new String[0]), (d, which) -> {
                     if (which == 0) {
                         switchTo(slot);
-                    } else {
+                    } else if (which == 1) {
                         showRenameDialog(slot);
+                    } else {
+                        confirmDelete(slot);
                     }
                 })
                 .show();
@@ -214,7 +226,8 @@ public class SlotActivity extends AppCompatActivity {
                 .setPositiveButton(R.string.slot_switch, (d, w) -> {
                     final String target = pkg;
                     io.execute(() -> {
-                        final boolean ok = TargetRepo.writeSlot(target, slot);
+                        // 切完直接强停：只写 slot 文件不会立即生效，用户极易漏做这一步
+                        final boolean ok = TargetRepo.switchAndStop(target, slot);
                         ui.post(() -> {
                             if (isFinishing() || isDestroyed()) {
                                 return;
@@ -227,6 +240,53 @@ public class SlotActivity extends AppCompatActivity {
                     });
                 })
                 .show();
+    }
+
+    /** 删除单槽：两次确认，且不允许删当前正在用的槽（先切走再说）。 */
+    private void confirmDelete(final String slot) {
+        if (slot.equals(current)) {
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle(R.string.slot_delete)
+                    .setMessage(getString(R.string.slot_delete_current, slot))
+                    .setPositiveButton(R.string.ok, null)
+                    .show();
+            return;
+        }
+        long size = SlotStats.sizeOf(sizes, slot);
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.slot_delete)
+                .setMessage(getString(R.string.slot_delete_confirm,
+                        slot, SlotStats.formatSize(size)))
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.slot_delete_yes, (d, w) -> confirmDelete2(slot))
+                .show();
+    }
+
+    private void confirmDelete2(final String slot) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.slot_delete)
+                .setMessage(getString(R.string.slot_delete_confirm2, slot))
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.slot_delete_yes, (d, w) -> doDelete(slot))
+                .show();
+    }
+
+    private void doDelete(final String slot) {
+        final String target = pkg;
+        if (target == null) {
+            return;
+        }
+        io.execute(() -> {
+            final boolean ok = TargetRepo.deleteSlot(target, slot);
+            ui.post(() -> {
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+                toast(ok ? getString(R.string.slot_deleted, slot)
+                        : getString(R.string.slot_delete_fail, getString(R.string.root_denied)));
+                reload();
+            });
+        });
     }
 
     private void forceStop() {
@@ -279,7 +339,13 @@ public class SlotActivity extends AppCompatActivity {
             h.name.setText(slot);
             boolean isCurrent = slot.equals(current);
             h.tag.setVisibility(isCurrent ? View.VISIBLE : View.GONE);
-            h.meta.setVisibility(View.GONE);
+            long size = SlotStats.sizeOf(sizes, slot);
+            if (size < 0) {
+                h.meta.setVisibility(View.GONE);
+            } else {
+                h.meta.setVisibility(View.VISIBLE);
+                h.meta.setText(SlotStats.formatSize(size));
+            }
             h.itemView.setOnClickListener(v -> showActions(slot));
         }
 

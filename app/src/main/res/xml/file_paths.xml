@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 诊断包写在 App 自己的外部私有目录，无需任何存储权限 -->
+    <external-files-path
+        name="diag"
+        path="." />
+</paths>
