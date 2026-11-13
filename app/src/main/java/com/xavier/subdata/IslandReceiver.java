@@ -61,14 +61,26 @@ public class IslandReceiver extends BroadcastReceiver {
         final List<String> senderPkgs = senderPkgs(app, this, uid);
         final List<String> whitelist = new TargetStore(app).targets();
 
-        if (!IslandBroadcast.senderAllowed(senderPkgs, whitelist)) {
-            log("reject uid=" + uid + " pkgs=" + senderPkgs + " (not in whitelist)");
-            return;
-        }
         final String claimed = intent.getStringExtra(IslandBroadcast.EXTRA_PKG);
-        if (!IslandBroadcast.claimedPkgAllowed(claimed, senderPkgs, whitelist)) {
-            log("reject claimed pkg=" + claimed + " uid=" + uid + " pkgs=" + senderPkgs);
-            return;
+        final boolean senderKnown = uid >= 0 || !senderPkgs.isEmpty();
+        if (senderKnown) {
+            if (!IslandBroadcast.senderAllowed(senderPkgs, whitelist)) {
+                log("reject uid=" + uid + " pkgs=" + senderPkgs + " (not in whitelist)");
+                return;
+            }
+            if (!IslandBroadcast.claimedPkgAllowed(claimed, senderPkgs, whitelist)) {
+                log("reject claimed pkg=" + claimed + " uid=" + uid + " pkgs=" + senderPkgs);
+                return;
+            }
+        } else {
+            // 某些 ROM / Vector 组合下拿不到发送方身份（uid=-1 且 sentFromPackage=null）。
+            // 退化为「自认 + 白名单 + 已安装」校验：最坏影响只是有人能触发一条通知，不涉及数据访问。
+            log("warn: sender unknown (uid=-1), fallback to claimed-pkg check pkg=" + claimed);
+            if (!IslandBroadcast.claimedPkgAllowed(claimed, java.util.Collections.singletonList(claimed), whitelist)
+                    || !isInstalled(app, claimed)) {
+                log("reject fallback claimed pkg=" + claimed);
+                return;
+            }
         }
         final String slot = IslandBroadcast.sanitizeSlot(
                 intent.getStringExtra(IslandBroadcast.EXTRA_SLOT));
@@ -103,6 +115,14 @@ public class IslandReceiver extends BroadcastReceiver {
      * （实测 emulator API 37 上 {@code am broadcast} 发起时 {@code getSentFromUid()} 返回 -1），
      * 只认 uid 会让超级岛在某些设备上静默失效。
      */
+    private static boolean isInstalled(Context ctx, String pkg) {
+        try {
+            return pkg != null && ctx.getPackageManager().getPackageInfo(pkg, 0) != null;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     static List<String> senderPkgs(Context ctx, BroadcastReceiver r, int uid) {
         if (uid >= 0) {
             return pkgsForUid(ctx, uid);
