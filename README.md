@@ -138,22 +138,35 @@ su -c 'mkdir -p /data/data/com.chaoxing.mobile/subdata/b && touch /data/data/com
 | 大岛正文 | 当前使用 `b` 槽 · 与原数据隔离 |
 | 小岛 | App 图标 + 「副本数据」 |
 
-实现要点（`IslandParam` + `IslandNotice`）：
+实现要点（v0.3.1 起改为「目标进程发广播、模块 App 发通知」）：
 
-- `miui.focus.param` 的 JSON 由 `IslandParam#json(String slot)` 生成，结构与真机上
-  已进岛的通知 dump 完全一致（`param_v2` / `param_island` / `baseInfo.type=2`），
-  `business` 用 `subdata_slot`；
-- 反射调隐藏 API `Notification#promoteOngoing(true)`，方法不存在（非 MIUI）就只写日志；
-- extras 里放 `android.requestPromotedOngoing=true`、`miui.focus.param=<JSON>`，
-  能取到 App 图标时再放 `miui.focus.pics` Bundle（取不到就不放）；
-- 通知渠道 `subdata_island`：`IMPORTANCE_HIGH`、无声、`setOngoing(true)`、`setShowWhen(false)`，
-  小图标用 App 自己的图标；
-- 在 `Application#attach` 之后 2 秒发出，并且**只在主进程**发（多进程 App 的推送进程不发）；
-- 主槽、或 `island_notice=false` 时反而会把残留通知取消掉。
+```
+目标 App 进程（被注入）                      模块 App 进程（com.xavier.subdata）
+SubDataModule → IslandNotice    ──显式广播──▶  IslandReceiver → IslandPoster
+只判断要不要上岛，绝不 notify()                认人 + 节流 + post / cancel
+```
 
-失败不会崩：目标 App 没开通知权限（`areNotificationsEnabled()==false`）、
-ROM 没有 `promoteOngoing`、渠道建不出来，都只写一行 `subdata.log`。
-模块**不会**替你申请 `POST_NOTIFICATIONS`，也不会弹任何权限框。
+- **为什么要换人发**：`NotificationManager.notify()` 的通知归属 `Context` 的包名。模块虽然跑在
+  目标进程里，但拿到的是目标 App 的 Context → 通知归属目标 App；而 Via / 学习通**没有**
+  `android.permission.POST_PROMOTED_NOTIFICATIONS`，永远拿不到 `PROMOTED_ONGOING`，
+  反射 `promoteOngoing` 也找不到隐藏方法（`island: promoteOngoing not found (non-MIUI?), skip`）。
+  对照 App `io.github.ccch1mneyyy.dsh_app` 声明了该权限、`granted=true`，所以它能上岛。
+- **广播协议**：action `com.xavier.subdata.action.ISLAND_STATE`，显式组件
+  `com.xavier.subdata/.IslandReceiver`，extras `pkg` / `slot` / `isMainSlot` / `want` / `v`。
+  一次广播 = 一次状态同步，接收端 `want ? post : cancel`。
+- **安全**（接收器是 `exported=true`）：`getSendingUid()` → `getPackagesForUid` →
+  至少一个包名在白名单；extras 里的 `pkg` 还必须既在白名单、又真的属于该 uid；
+  `slot` 过 `SlotConfig.sanitize`。uid 取不到时退回 `getSentFromPackage()`，都取不到就拒绝。
+- **防风暴**：发送端与接收端各有一份 10s 时间窗节流（key = `pkg#slot#want`），只有主进程发。
+- 通知内容不变：`android.requestPromotedOngoing=true` + `miui.focus.param=<JSON>`
+  （`IslandParam#json`，`business=subdata_slot`）+ `miui.focus.pics`；`promoteOngoing` 失败只记日志。
+- 模块 App 现在声明了 `POST_PROMOTED_NOTIFICATIONS`（普通权限，自动授予）与
+  `POST_NOTIFICATIONS`（API 33+ 运行时权限，首次进首页申请一次）。
+- 三级退化都不崩：没开通知权限 → 撤掉并跳过；没有 `POST_PROMOTED_NOTIFICATIONS` → 只靠 extras；
+  没有 `promoteOngoing` → 同上。
+
+> 模拟器**验不了**超级岛（没有 HyperOS 通知岛，也没有 LSPosed 注入）。
+> 真机待验清单见 `docs/PLAN-v031.md` §6。
 
 关掉：
 
@@ -172,6 +185,19 @@ su -c 'am force-stop com.chaoxing.mobile'
 # 2) 彻底清理模块痕迹：
 su -c 'rm -rf /data/data/com.chaoxing.mobile/subdata'
 ```
+
+## 8.5 v0.3.1 变更（0.3.1-beta / versionCode 5）
+
+主题：**超级岛换发送者 + 白名单真生效 + EXT 树克隆 + 半成品槽自愈**（设计细节见 `docs/PLAN-v031.md`）。
+
+| 项 | 变更 |
+| --- | --- |
+| 超级岛 | 目标进程不再自己发；改发显式广播，模块 App 用自己的包名 post（权限在模块 App 上） |
+| 白名单 | manifest 增加 `<meta-data android:name="xposedsharedprefs" android:value="true"/>`，`XSharedPreferences` 终于能读到 UI 写入的 targets；日志会打印 prefs 路径 + readable + 原始值；不再依赖改 `DEFAULT_TARGETS` 的临时 hack |
+| EXT 克隆 | 新增 `ExtCloner`：把 `Android/data/<pkg>/` 克隆到 `<ext>/subdata/<slot>/`（排除 `subdata`/`cache`/`code_cache`/`no_backup`/`lib`），>512MB 或 >25s 只建骨架并写跳过标记（Via 壁纸终于能跟着槽走） |
+| 半成品自愈 | 新增 `SlotState` 状态机：`.cloning-<slot>` / `.cloned-<slot>` / `.clone-skipped-<slot>`；有 `.cloning` 残留 → 清掉重做，绝不把半成品当成品 |
+| 原子写 | `subdata/slot` 与 `subdata.conf` 改为「临时文件 + `fsync` + rename」（root 侧用 `mv -f`），写一半掉电不会退回默认 slot |
+| 单测 | 74 → 118（新增 `SlotStateTest` / `ExtClonerTest` / `AtomicFilesTest` / `IslandBroadcastTest` / `IslandDebounceTest`） |
 
 ## 9. 已知限制
 
@@ -192,12 +218,19 @@ subdata/
 │   ├── PathMap.java          # 纯路径映射（无 Android 依赖，可单测）
 │   ├── SlotConfig.java       # slot / 配置文件读取（含 main_slot / island_notice）
 │   ├── SlotSkeleton.java     # slot 目录骨架（不克隆也要建目录；CE + DE）
-│   ├── DataCloner.java       # 首次 clone
+│   ├── DataCloner.java       # 首次 clone（CE，接 SlotState 状态机）
+│   ├── ExtCloner.java        # 首次 clone（EXT，512MB / 25s / 2 万条目三道闸）
+│   ├── SlotState.java        # .cloning / .cloned / .clone-skipped 状态机 + 自愈
+│   ├── AtomicFiles.java      # 临时文件 + fsync + rename 原子写
+│   ├── ModuleMeta.java       # 模块包名 / prefs 名 / 权限名（纯 Java，App 侧可安全引用）
 │   ├── IslandParam.java      # 超级岛 JSON / 文案（纯字符串，可单测）
-│   ├── IslandNotice.java     # 发超级岛通知（promoteOngoing 反射 + extras）
+│   ├── IslandNotice.java     # 发送端：判断要不要上岛 → 发显式广播
+│   ├── IslandBroadcast.java  # 广播协议常量 + 发送方/包名/slot 校验（纯逻辑，可单测）
+│   ├── IslandDebounce.java   # 10s 时间窗节流（纯逻辑，可单测）
+│   ├── IslandReceiver.java   # 接收端：认人 → IslandPoster
+│   ├── IslandPoster.java     # 用模块 App 身份 post / cancel 超级岛通知
 │   └── MainActivity.java     # 模块配置界面
-├── app/src/test/java/...     # PathMapTest / SlotConfigTest / SlotSkeletonTest
-│                             # / IslandParamTest / SlotConfigExtTest（共 47 个）
+├── app/src/test/java/...     # 10 个测试类，共 118 个用例（0.3.1 新增 5 个类）
 ├── app/libs/xposed-api-82.jar
 └── PLAN.md                   # 调研结论 / 设计 / 风险 / TODO
 ```

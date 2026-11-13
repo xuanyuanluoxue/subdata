@@ -51,3 +51,21 @@
 - 产品规划与被否决项：见 `docs/PRODUCT-v030.md`
 - 待真机验证：超级岛「副本数据」提示、诊断包分享面板、真实目标 App 的槽体积与切槽
 
+
+## v0.3.1-beta（B 线五期）
+
+依据 Lead 的真机实测（槽隔离成立；超级岛失败于权限；prefs 不可读；EXT 树不克隆）：
+
+| 变更 | 落点 |
+|---|---|
+| 超级岛改由模块 App 发 | `IslandNotice`（发送端，只发显式广播）+ `IslandBroadcast`（协议/校验）+ `IslandReceiver` + `IslandPoster`（模块 App 身份 post）；模块 App 新声明 `POST_PROMOTED_NOTIFICATIONS` + `POST_NOTIFICATIONS` |
+| 白名单生效 | manifest `<meta-data name="xposedsharedprefs">`；`SubDataModule#readTargets()` 打印 prefs 路径/可读性/原始值；不再依赖改 `DEFAULT_TARGETS`；常量搬进纯 Java `ModuleMeta` |
+| EXT 树克隆 | `ExtCloner`：`Android/data/<pkg>/` → `<ext>/subdata/<slot>/`，排除 `subdata`/`cache`/`code_cache`/`no_backup`/`lib`；>512MB / >25s / >2 万条目 → 只建骨架 + 跳过标记 |
+| 半成品自愈 | `SlotState`：`.cloning-<slot>` / `.cloned-<slot>` / `.clone-skipped-<slot>`；`.cloning` 残留 → 清掉重做 |
+| 原子写 | `AtomicFiles`（tmp + fsync + rename）+ `RootShell#writeFileAtomic`（`mv -f`）覆盖 `slot` 与 `subdata.conf` |
+
+- 单测：118 例全绿（新增 44 例：`SlotStateTest` / `ExtClonerTest` / `AtomicFilesTest` / `IslandBroadcastTest` / `IslandDebounceTest`）
+- 产物：`app/build/outputs/apk/debug/app-debug.apk`（versionCode 5 / versionName 0.3.1-beta）
+- 模拟器（emulator-5554）冒烟：装包 + 四个 Activity 不崩 + 白名单写入可读回 + 广播对非白名单发送方拒绝
+- **真机待验**：真的能上岛、`POST_PROMOTED_NOTIFICATIONS` 授权结果、`xposedsharedprefs` 后直接注入 Via、EXT 克隆 83MB 的首启手感、半成品自愈日志
+- 设计文档：`docs/PLAN-v031.md`
