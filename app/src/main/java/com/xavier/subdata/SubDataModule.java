@@ -32,9 +32,11 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  */
 public class SubDataModule implements IXposedHookLoadPackage, IXposedHookZygoteInit {
 
-    public static final String MODULE_PKG = "com.xavier.subdata";
-    public static final String PREFS_NAME = "subdata";
-    public static final String DEFAULT_TARGETS = "com.chaoxing.mobile";
+    /** 常量统一放在 {@link ModuleMeta}：模块 App 的界面 / 广播接收器也会用到，
+     *  不能让它们引用本类（本类 implements 了 Xposed 接口，App 进程里加载不了）。 */
+    public static final String MODULE_PKG = ModuleMeta.MODULE_PKG;
+    public static final String PREFS_NAME = ModuleMeta.PREFS_NAME;
+    public static final String DEFAULT_TARGETS = ModuleMeta.DEFAULT_TARGETS;
 
     private static final String TAG = "SubData";
     private static final String CONTEXT_IMPL = "android.app.ContextImpl";
@@ -87,16 +89,41 @@ public class SubDataModule implements IXposedHookLoadPackage, IXposedHookZygoteI
         return false;
     }
 
+    /**
+     * 读模块白名单。
+     *
+     * <p>v0.3.1 修的 bug：真机上 {@code XSharedPreferences} 一直读到空值 → 白名单完全不生效，
+     * 上一轮只能临时改 {@link #DEFAULT_TARGETS} 才注入了 Via。根因是 LSPosed 需要模块
+     * manifest 里声明 {@code <meta-data android:name="xposedsharedprefs" android:value="true"/>}，
+     * 否则目标进程读到的是「文件不存在」而不是「内容为空」。
+     *
+     * <p>所以这里做两件事：把读到的原始值、来源和路径都写进日志（以后一眼能看出是
+     * 「没配内容」还是「没权限读」），并 best-effort 调一次 {@code makeWorldReadable()}。
+     */
     private static String readTargets() {
         try {
             XSharedPreferences prefs = new XSharedPreferences(MODULE_PKG, PREFS_NAME);
             prefs.reload();
+            try {
+                // 老 API：把 prefs 文件放开到可读。声明了 xposedsharedprefs 后其实不需要，
+                // 但对不认 meta-data 的实现是一层兜底。
+                prefs.makeWorldReadable();
+            } catch (Throwable ignored) {
+                // 新系统上可能直接抛，忽略
+            }
             String v = prefs.getString("targets", null);
+            File f = prefs.getFile();
+            boolean readable = f != null && f.canRead();
+            logFile("prefs " + (f == null ? "<no file>" : f.getAbsolutePath())
+                    + " readable=" + readable + " targets=" + (v == null ? "<null>" : "'" + v + "'"));
             if (v != null && !v.trim().isEmpty()) {
                 return v;
             }
+            logFile("targets empty -> fallback " + DEFAULT_TARGETS
+                    + " (check meta-data " + ModuleMeta.META_SHARED_PREFS + ")");
         } catch (Throwable t) {
             XposedBridge.log(TAG + ": cannot read module prefs: " + t);
+            logFile("cannot read module prefs: " + t);
         }
         return DEFAULT_TARGETS;
     }
