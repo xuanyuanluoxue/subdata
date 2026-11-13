@@ -51,6 +51,17 @@
             android:name=".LogActivity"
             android:exported="false"
             android:label="@string/title_log" />
+
+        <!-- 诊断包分享：把 App 外部私有目录里的报告临时授权给分享目标读取 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

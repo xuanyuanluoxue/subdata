@@ -246,6 +246,22 @@
                         android:alpha="0.7"
                         android:text="@string/slot_switch_tip"
                         android:textAppearance="?attr/textAppearanceBodySmall" />
+
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/chips_slots"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:visibility="gone"
+                        app:chipSpacingHorizontal="6dp" />
+
+                    <TextView
+                        android:id="@+id/tv_health"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:visibility="gone" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

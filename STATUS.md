@@ -32,3 +32,22 @@
 
 - 不要改系统分区、不要 hook system_server
 - 不要执行删盘/格式化/重启
+
+## v0.3.0-beta（B 线四期）
+
+主题：**看得见 / 切得动 / 救得回**。没有新增任何 hook，没动 `PathMap` / `SubDataModule` 的映射逻辑。
+
+| 功能 | 落点 |
+|---|---|
+| 每槽数据占用 | `SlotStats`（纯 Java，du 解析 + 体积格式化）+ `TargetRepo.slotSizes()` |
+| 首页一键切槽 | `TargetRepo.switchAndStop()` + `MainActivity` 槽 chip 行 |
+| 删除单个副本 | `TargetRepo.deleteSlot()` + `SlotActivity` 动作菜单（双重确认 + 当前槽保护） |
+| 配置体检 | `HealthCheck`（INFO/WARN/DANGER 三级）+ 首页 `tv_health` |
+| 诊断包导出 | `Diagnostics` + `LogActivity` 按钮 + FileProvider 分享 |
+| 越界防护 | `SlotConfig.sanitizePkg()` + `TargetRepo.validPkg()` 守卫所有 rm/mkdir/写文件入口 |
+
+- 单测：74 例全绿（含 v0.2.1 带入的 25 例；本版新增 27 例）
+- 产物：`app/build/outputs/apk/debug/app-debug.apk`（versionCode 4 / versionName 0.3.0-beta）
+- 产品规划与被否决项：见 `docs/PRODUCT-v030.md`
+- 待真机验证：超级岛「副本数据」提示、诊断包分享面板、真实目标 App 的槽体积与切槽
+
